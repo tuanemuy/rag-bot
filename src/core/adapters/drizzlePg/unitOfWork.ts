@@ -14,18 +14,14 @@ export class DrizzlePgUnitOfWorkProvider implements UnitOfWorkProvider {
     } as Repositories;
   }
 
-  async runInTx<T>(
-    fn: (repositories: Repositories) => Promise<T>,
-  ): Promise<T> {
+  async runInTx<T>(fn: (repositories: Repositories) => Promise<T>): Promise<T> {
     return this.db.transaction(async (tx) => {
       const repositories = this.createRepositories(tx);
       return fn(repositories);
     });
   }
 
-  async run<T>(
-    fn: (repositories: Repositories) => Promise<T>,
-  ): Promise<T> {
+  async run<T>(fn: (repositories: Repositories) => Promise<T>): Promise<T> {
     const repositories = this.createRepositories(this.db);
     return fn(repositories);
   }
