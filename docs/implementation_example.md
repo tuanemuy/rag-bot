@@ -3,7 +3,7 @@
 ## Entities example
 
 ```typescript
-// app/core/domain/post/entity.ts
+// src/core/domain/post/entity.ts
 
 import { validate } from "@/lib/validation";
 import { BusinessRuleError } from "@/core/domain/error";
@@ -63,7 +63,7 @@ export function updatePostContent(post: Post, newContent: string): Post {
 ## Value Objects example
 
 ```typescript
-// app/core/domain/post/valueObject.ts
+// src/core/domain/post/valueObject.ts
 
 import { v7 as uuidv7 } from "uuid";
 import { UserErrorCode } form "./errorCode";
@@ -109,7 +109,7 @@ export function createPostStatus(status: string): PostStatus {
 ## Ports example
 
 ```typescript
-// app/core/domain/post/ports/postRepository.ts
+// src/core/domain/post/ports/postRepository.ts
 
 import type { Pagination, PaginationResult } from "@/lib/pagination";
 import type { RepositoryError } from "@/core/error/adapter";
@@ -124,7 +124,7 @@ export interface PostRepository {
 ```
 
 ```typescript
-// app/core/domain/file/ports/storageManager.ts
+// src/core/domain/file/ports/storageManager.ts
 
 export interface StorageManager {
   uploadFile(/* Arguments */): Promise</* ReturnType */>;
@@ -135,7 +135,7 @@ export interface StorageManager {
 ## Adapters example
 
 ```typescript
-// app/core/adapters/drizzleSqlite/postRepository.ts
+// src/core/adapters/drizzleSqlite/postRepository.ts
 
 import type { InferSelectModel } from "drizzle-orm";
 import type { Pagination, PaginationResult } from "@/lib/pagination";
@@ -217,7 +217,7 @@ export class DrizzleSqlitePostRepository implements PostRepository {
 ## Database schema example
 
 ```typescript
-// app/core/adapters/drizzleSqlite/schema.ts
+// src/core/adapters/drizzleSqlite/schema.ts
 
 import { v7 as uuidv7 } from "uuid";
 
@@ -240,7 +240,7 @@ export const posts = sqliteTable(
 ## Application Service example
 
 ```typescript
-// app/core/application/post/createPost.ts
+// src/core/application/post/createPost.ts
 
 import { type DraftPost, createPost } from "@/core/domain/post/entity";
 import type { PostContent, PostStatus } from "@/core/domain/post/valueObject";
@@ -285,7 +285,7 @@ export async function createPost(
 
 ```typescript
 // DI Container for specific environment
-// ex: app/container.ts
+// ex: src/container.ts
 
 import { getDatabase } from "@/core/adapters/drizzleSqlite/client";
 

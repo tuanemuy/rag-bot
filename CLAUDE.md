@@ -32,19 +32,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hexagonal architecture with domain-driven design principles:
 
-- **Domain Layer** (`app/core/domain/`): Contains business logic, types, and port interfaces
-    - `app/core/domain/${domain}/entity.ts`: Domain entities
-    - `app/core/domain/${domain}/valueObject.ts`: Value objects
-    - `app/core/domain/${domain}/ports/**.ts`: Port interfaces for external services (repositories, exteranl APIs, etc.)
-    - `app/core/domain/${domain}/services/**.ts`: Domain services for complex business logic
-- **Adapter Layer** (`app/core/adapters/`): Contains concrete implementations for external services
-    - `app/core/adapters/${externalServiceProvider}/**.ts`: Adapters for external services like databases, APIs, etc.
-- **Application Layer** (`app/core/application/`): Contains use cases and application services
-    - `app/core/application/context.ts`: Context type for dependency injection
-    - `app/core/application/${domain}/${usecase}.ts`: Application services that orchestrate domain logic. Each service is a function that takes a context object.
-    - `app/core/domain/error.ts`: Error types for business logic
-    - `app/core/domain/${domain}/errorCode.ts`: Error codes for each domain
-    - `app/core/applicaion/error.ts`: Error types for application layer
+- **Domain Layer** (`src/core/domain/`): Contains business logic, types, and port interfaces
+    - `src/core/domain/${domain}/entity.ts`: Domain entities
+    - `src/core/domain/${domain}/valueObject.ts`: Value objects
+    - `src/core/domain/${domain}/ports/**.ts`: Port interfaces for external services (repositories, exteranl APIs, etc.)
+    - `src/core/domain/${domain}/services/**.ts`: Domain services for complex business logic
+- **Adapter Layer** (`src/core/adapters/`): Contains concrete implementations for external services
+    - `src/core/adapters/${externalServiceProvider}/**.ts`: Adapters for external services like databases, APIs, etc.
+- **Application Layer** (`src/core/application/`): Contains use cases and application services
+    - `src/core/application/context.ts`: Context type for dependency injection
+    - `src/core/application/${domain}/${usecase}.ts`: Application services that orchestrate domain logic. Each service is a function that takes a context object.
+    - `src/core/domain/error.ts`: Error types for business logic
+    - `src/core/domain/${domain}/errorCode.ts`: Error codes for each domain
+    - `src/core/applicaion/error.ts`: Error types for application layer
 
 ### Example Implementation
 
@@ -59,21 +59,21 @@ Hono application code using:
 - Zod for input validation
 
 - Routes
-    - `app/api/routes/`: Route handlers
+    - `src/api/routes/`: Route handlers
 - Middlewares
-    - `app/api/middlewares/`: Middlewares for authentication, logging, etc.
+    - `src/api/middlewares/`: Middlewares for authentication, logging, etc.
 
 ## Error Handling
 
 ### Domain Layer
 
-- `app/core/domain/error.ts`: Defines `BusinessRuleError`.
-- `app/core/domain/${domain}/errorCode.ts`: Error codes are defined within each respective domain.
+- `src/core/domain/error.ts`: Defines `BusinessRuleError`.
+- `src/core/domain/${domain}/errorCode.ts`: Error codes are defined within each respective domain.
 - Avoids using `try-catch`; throws a `BusinessRuleError` exception when a violation can be determined by the logic.
 
 ### Application Layer
 
-- `app/core/application/error.ts`: Defines the following errors:
+- `src/core/application/error.ts`: Defines the following errors:
     - `NotFoundError`
     - `ConflictError`
     - `UnauthenticatedError`
