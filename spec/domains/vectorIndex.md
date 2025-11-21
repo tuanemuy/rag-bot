@@ -60,14 +60,13 @@ type SearchResult = Readonly<{
 
 ```typescript
 type VectorIndexStatus = Readonly<{
-  exists: boolean;
   entryCount: number;
   lastUpdatedAt: Date | null;
 }>;
 
 function isIndexAvailable(status: VectorIndexStatus): boolean {
-  // インデックスが存在し、エントリが1件以上ある場合のみ利用可能
-  return status.exists && status.entryCount > 0;
+  // エントリが1件以上ある場合のみ利用可能
+  return status.entryCount > 0;
 }
 ```
 
@@ -331,7 +330,6 @@ interface VectorStore {
    * **実装仕様**:
    * - `entryCount`: vector_index_entriesテーブルの総件数
    * - `lastUpdatedAt`: vector_index_entriesテーブルのcreated_atの最大値（MAX）
-   * - `exists`: entryCount > 0 の場合true
    *
    * エントリが0件の場合、lastUpdatedAtはnullを返す
    */

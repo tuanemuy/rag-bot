@@ -215,6 +215,15 @@ type AnswerSource = Readonly<{
 -- pgvector拡張を有効化
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- updated_at自動更新用のトリガー関数
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
 -- documentsテーブル
 CREATE TABLE documents (
   id VARCHAR(255) PRIMARY KEY,
@@ -227,6 +236,13 @@ CREATE TABLE documents (
 );
 
 CREATE INDEX idx_documents_fetched_at ON documents(fetched_at);
+
+-- documents.updated_at自動更新トリガー
+-- 将来の差分更新方式に備えて定義
+CREATE TRIGGER update_documents_updated_at
+    BEFORE UPDATE ON documents
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
 
 -- vector_index_entriesテーブル
 CREATE TABLE vector_index_entries (

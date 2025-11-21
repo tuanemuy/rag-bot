@@ -182,19 +182,46 @@ type CursorPagination = Readonly<{
 
 ### ParserConfig
 
-パーサーの設定。DocumentFormatConfigの型エイリアス。
+パーサーの設定。各ドキュメント形式のパースに必要な設定を定義する。
 
 ```typescript
-// 設定ファイルのDocumentFormatConfigを直接使用
-import { DocumentFormatConfig } from "../../config";
+/**
+ * JSONドキュメントのパース設定
+ */
+type JsonParserConfig = Readonly<{
+  format: "json";
+  titlePath: string;        // タイトルを取得するJSONパス
+  contentPath: string;      // コンテンツを取得するJSONパス
+  metadataPath?: string;    // メタデータを取得するJSONパス（オプショナル）
+}>;
 
-type ParserConfig = DocumentFormatConfig;
+/**
+ * HTMLドキュメントのパース設定
+ */
+type HtmlParserConfig = Readonly<{
+  format: "html";
+  titleSelector: string;    // タイトルを取得するCSSセレクタ
+  contentSelector: string;  // コンテンツを取得するCSSセレクタ
+}>;
+
+/**
+ * プレーンテキストドキュメントのパース設定
+ */
+type TextParserConfig = Readonly<{
+  format: "text";
+  titleLineCount?: number;  // タイトルとして使用する行数（デフォルト: 1）
+}>;
+
+/**
+ * パーサー設定の判別共用体
+ */
+type ParserConfig = JsonParserConfig | HtmlParserConfig | TextParserConfig;
 ```
 
 **設計意図**:
-- ParserConfigとDocumentFormatConfigは同一の構造を持つ
-- 重複した型定義を避けるため、型エイリアスとして定義
-- DIコンテナ生成時に設定から取得したDocumentFormatConfigをそのままDocumentParserに渡すことができる
+- ドメイン層で独立した値オブジェクトとして定義し、外部モジュールへの依存を避ける
+- 判別共用体を使用して各形式の設定を型安全に扱う
+- DIコンテナ生成時に環境変数から読み込んだ設定値をもとにParserConfigを生成し、DocumentParserアダプターに注入する
 
 ## エラーコード
 
@@ -235,7 +262,8 @@ type DocumentErrorCode = typeof DocumentErrorCode[keyof typeof DocumentErrorCode
 interface DocumentListFetcher {
   /**
    * ドキュメント一覧を取得する（オフセットベース）
-   * @throws SystemError - API呼び出しに失敗した場合
+   * リトライ処理はアダプター実装で行う（指数バックオフ）
+   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
    */
   fetchWithOffset(offset: number, limit: number): Promise<{
     items: DocumentListItem[];
@@ -244,7 +272,8 @@ interface DocumentListFetcher {
 
   /**
    * ドキュメント一覧を取得する（カーソルベース）
-   * @throws SystemError - API呼び出しに失敗した場合
+   * リトライ処理はアダプター実装で行う（指数バックオフ）
+   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
    */
   fetchWithCursor(cursor: string | null): Promise<{
     items: DocumentListItem[];
@@ -261,8 +290,9 @@ interface DocumentListFetcher {
 interface DocumentContentFetcher {
   /**
    * ドキュメント内容を取得する
+   * リトライ処理はアダプター実装で行う（指数バックオフ）
    * @param item - ドキュメントリストアイテム（id と url を含む）
-   * @throws SystemError - API呼び出しに失敗した場合
+   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
    */
   fetch(item: DocumentListItem): Promise<RawDocument>;
 }
@@ -272,6 +302,27 @@ interface DocumentContentFetcher {
 - 引数を`DocumentListItem`とすることで、idとurlを両方渡せる
 - フェッチャーが完全な`RawDocument`（idを含む）を生成できる
 - 呼び出し元でidを付与する必要がなくなり、シンプルな設計になる
+
+#### リトライポリシー
+
+DocumentListFetcherおよびDocumentContentFetcherのアダプター実装は、以下のリトライポリシーに従う。
+
+- **リトライ対象エラー**: ネットワークエラー、5xx系サーバーエラー、429 Too Many Requests
+- **リトライ対象外**: 4xx系クライアントエラー（400, 401, 403, 404など）
+- **アルゴリズム**: 指数バックオフ（Exponential Backoff）
+- **設定**: 設定の`documentApi.retry`を参照
+  - maxRetries: 最大リトライ回数（デフォルト: 3）
+  - initialDelayMs: 初回遅延（デフォルト: 1000ms）
+  - maxDelayMs: 最大遅延（デフォルト: 10000ms）
+  - backoffMultiplier: 乗数（デフォルト: 2）
+
+```typescript
+// 遅延計算例
+// attempt 1: 1000ms
+// attempt 2: 2000ms
+// attempt 3: 4000ms (maxDelayMsで上限)
+delay = min(initialDelayMs * (backoffMultiplier ^ (attempt - 1)), maxDelayMs)
+```
 
 ### DocumentParser
 

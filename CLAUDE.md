@@ -27,6 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **API**: Hono
 - **Database**: PostgreSQL with Drizzle ORM
 - **RAG Framework**: LlamaIndex, LangChain, etc...
+- **bot Framework**: Line Messaging API SDK
 
 ## Core Architecture
 
