@@ -1,6 +1,6 @@
 // import { ConsoleLogger } from "@/core/adapters/console/logger";
-import { getDatabase } from "@/core/adapters/drizzleSqlite/client";
-import { DrizzleSqliteUnitOfWorkProvider } from "@/core/adapters/drizzleSqlite/unitOfWork";
+import { getDatabase } from "@/core/adapters/drizzlePg/client";
+import { DrizzlePgUnitOfWorkProvider } from "@/core/adapters/drizzlePg/unitOfWork";
 import type { AppConfig, Container } from "@/core/application/container";
 
 export function withContainer<T extends unknown[], K>(
@@ -23,7 +23,7 @@ function createContainer(): Container {
   const db = getDatabase(config.databaseUrl);
 
   // Create adapters
-  const unitOfWorkProvider = new DrizzleSqliteUnitOfWorkProvider(db);
+  const unitOfWorkProvider = new DrizzlePgUnitOfWorkProvider(db);
   // const logger = new ConsoleLogger();
 
   return {

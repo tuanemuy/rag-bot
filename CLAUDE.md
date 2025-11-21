@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Runtime**: Node.js 22.x
 - **API**: Hono
-- **Database**: Turso with Drizzle ORM
+- **Database**: PostgreSQL with Drizzle ORM
 - **RAG Framework**: LlamaIndex, LangChain, etc...
 
 ## Core Architecture

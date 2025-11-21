@@ -2,15 +2,15 @@ import type {
   Repositories,
   UnitOfWorkProvider,
 } from "@/core/application/unitOfWork";
-// import { DrizzleSqlite${Entity}Repository } from "./${entity}Repository";
+// import { DrizzlePg${Entity}Repository } from "./${entity}Repository";
 import type { Database, Executor } from "./client";
 
-export class DrizzleSqliteUnitOfWorkProvider implements UnitOfWorkProvider {
+export class DrizzlePgUnitOfWorkProvider implements UnitOfWorkProvider {
   constructor(private readonly db: Database) {}
 
   private createRepositories(executor: Executor): Repositories {
     return {
-      // ${entity}Repository: new DrizzleSqlite${Entity}Repository(executor),
+      // ${entity}Repository: new DrizzlePg${Entity}Repository(executor),
     } as Repositories;
   }
 
