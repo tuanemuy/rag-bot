@@ -1,11 +1,3 @@
-// import { ${Domain}ErrorCode } from "./${domain}/errorCode";
-
-export const BusinessRuleErrorCode = {
-  // ...${Domain}ErrorCode,
-};
-export type BusinessRuleErrorCode =
-  (typeof BusinessRuleErrorCode)[keyof typeof BusinessRuleErrorCode];
-
 /**
  * Domain Layer - Business Rule Error
  *
@@ -14,7 +6,7 @@ export type BusinessRuleErrorCode =
  */
 export class BusinessRuleError extends Error {
   constructor(
-    public readonly code: BusinessRuleErrorCode,
+    public readonly code: string,
     message: string,
     public readonly details?: unknown,
   ) {
