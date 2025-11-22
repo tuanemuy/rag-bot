@@ -79,7 +79,7 @@ export function getEventSourceDestination(source: EventSource): string {
     default:
       throw new BusinessRuleError(
         MessageErrorCode.InvalidEventSource,
-        `Unknown event source type: ${(source as EventSource).type}`,
+        `Unknown event source type: ${source.type}`,
       );
   }
 }

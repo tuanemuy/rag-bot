@@ -51,16 +51,16 @@ export function createTextSplitterConfig(
   chunkSize: number,
   chunkOverlap: number,
 ): TextSplitterConfig {
-  if (chunkSize <= 0) {
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
     throw new BusinessRuleError(
       VectorIndexErrorCode.InvalidTextSplitterConfig,
-      "chunkSize must be a positive number",
+      "chunkSize must be a positive integer",
     );
   }
-  if (chunkOverlap < 0) {
+  if (!Number.isInteger(chunkOverlap) || chunkOverlap < 0) {
     throw new BusinessRuleError(
       VectorIndexErrorCode.InvalidTextSplitterConfig,
-      "chunkOverlap must be non-negative",
+      "chunkOverlap must be a non-negative integer",
     );
   }
   if (chunkOverlap >= chunkSize) {

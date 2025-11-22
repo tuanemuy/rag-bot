@@ -31,6 +31,12 @@ export function createDocumentContent(value: string): DocumentContent {
 export type DocumentUrl = string & { readonly brand: "DocumentUrl" };
 
 export function createDocumentUrl(value: string): DocumentUrl {
+  if (!value || value.trim() === "") {
+    throw new BusinessRuleError(
+      DocumentErrorCode.InvalidUrl,
+      "DocumentUrl cannot be empty",
+    );
+  }
   try {
     new URL(value);
   } catch {

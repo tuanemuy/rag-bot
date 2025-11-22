@@ -5,6 +5,7 @@ import {
   type AnswerContent,
   type AnswerId,
   type AnswerSourceId,
+  createAnswerContent,
   generateAnswerSourceId,
   type Question,
 } from "./valueObject";
@@ -90,8 +91,9 @@ export function createNoRelevantDocumentsAnswer(
   return {
     id,
     question,
-    content:
-      "該当する情報が見つかりませんでした。質問を変えてお試しください。" as AnswerContent,
+    content: createAnswerContent(
+      "該当する情報が見つかりませんでした。質問を変えてお試しください。",
+    ),
     sources: [],
     generatedAt: new Date(),
   };
@@ -104,8 +106,9 @@ export function createIndexNotBuiltAnswer(
   return {
     id,
     question,
-    content:
-      "インデックスが構築されていません。先にsyncコマンドを実行してください。" as AnswerContent,
+    content: createAnswerContent(
+      "インデックスが構築されていません。先にsyncコマンドを実行してください。",
+    ),
     sources: [],
     generatedAt: new Date(),
   };

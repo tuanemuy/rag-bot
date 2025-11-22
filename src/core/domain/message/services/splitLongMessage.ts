@@ -50,10 +50,13 @@ export function splitLongMessage(text: string): string[] {
 
   // 残りがある場合は省略メッセージを付与
   if (remaining.length > 0 && messages.length === MAX_MESSAGES) {
-    const lastMessage = messages[MAX_MESSAGES - 1];
-    if (lastMessage.length + TRUNCATION_MESSAGE.length <= MAX_LENGTH) {
-      messages[MAX_MESSAGES - 1] = `${lastMessage}${TRUNCATION_MESSAGE}`;
+    let lastMessage = messages[MAX_MESSAGES - 1];
+    // 省略メッセージ用のスペースを確保
+    const allowedLength = MAX_LENGTH - TRUNCATION_MESSAGE.length;
+    if (lastMessage.length > allowedLength) {
+      lastMessage = lastMessage.substring(0, allowedLength);
     }
+    messages[MAX_MESSAGES - 1] = `${lastMessage}${TRUNCATION_MESSAGE}`;
   }
 
   return messages;
