@@ -17,6 +17,8 @@ export const DocumentErrorCode = {
   // バリデーションエラー
   InvalidUrl: "DOCUMENT_INVALID_URL",
   EmptyContent: "DOCUMENT_EMPTY_CONTENT",
+  EmptyTitle: "DOCUMENT_EMPTY_TITLE",
+  InvalidPagination: "DOCUMENT_INVALID_PAGINATION",
 } as const;
 
 export type DocumentErrorCode =

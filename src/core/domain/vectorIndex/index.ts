@@ -15,6 +15,7 @@ export {
   createDocumentId,
   createEmbedding,
   createSimilarityScore,
+  createTextSplitterConfig,
   createTopK,
   createVectorIndexEntryId,
   type DocumentId,

@@ -61,7 +61,7 @@ export function createEventSource(params: {
   }
   return {
     type: params.type,
-    userId: params.userId ? (params.userId as UserId) : undefined,
+    userId: params.userId ? createUserId(params.userId) : undefined,
     groupId: params.groupId,
     roomId: params.roomId,
   };
@@ -76,6 +76,11 @@ export function getEventSourceDestination(source: EventSource): string {
       return source.groupId as string;
     case "room":
       return source.roomId as string;
+    default:
+      throw new BusinessRuleError(
+        MessageErrorCode.InvalidEventSource,
+        `Unknown event source type: ${(source as EventSource).type}`,
+      );
   }
 }
 
@@ -86,7 +91,21 @@ export type TextMessageContent = Readonly<{
 
 export type MessageContent = TextMessageContent;
 
+const MAX_TEXT_LENGTH = 5000;
+
 export function createTextMessageContent(text: string): TextMessageContent {
+  if (!text || text.trim() === "") {
+    throw new BusinessRuleError(
+      MessageErrorCode.EmptyMessageContent,
+      "Message text cannot be empty",
+    );
+  }
+  if (text.length > MAX_TEXT_LENGTH) {
+    throw new BusinessRuleError(
+      MessageErrorCode.MessageTooLong,
+      `Message text cannot exceed ${MAX_TEXT_LENGTH} characters`,
+    );
+  }
   return {
     type: "text",
     text,

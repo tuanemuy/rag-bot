@@ -22,12 +22,6 @@ export function createVectorIndexEntry(params: {
   chunkIndex: number;
   createdAt: Date;
 }): VectorIndexEntry {
-  if ((params.embedding as number[]).length === 0) {
-    throw new BusinessRuleError(
-      VectorIndexErrorCode.InvalidEmbedding,
-      "Embedding cannot be empty",
-    );
-  }
   if (params.chunkIndex < 0) {
     throw new BusinessRuleError(
       VectorIndexErrorCode.InvalidChunkIndex,

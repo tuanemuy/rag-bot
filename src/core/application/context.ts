@@ -1,11 +1,9 @@
 // Answer domain ports
 import type { AnswerGenerator } from "@/core/domain/answer/ports/answerGenerator";
-import type { AnswerRepository } from "@/core/domain/answer/ports/answerRepository";
 import type { DocumentContentFetcher } from "@/core/domain/document/ports/documentContentFetcher";
 // Document domain ports
 import type { DocumentListFetcher } from "@/core/domain/document/ports/documentListFetcher";
 import type { DocumentParser } from "@/core/domain/document/ports/documentParser";
-import type { DocumentRepository } from "@/core/domain/document/ports/documentRepository";
 // Message domain ports
 import type { MessageSender } from "@/core/domain/message/ports/messageSender";
 import type { EmbeddingGenerator } from "@/core/domain/vectorIndex/ports/embeddingGenerator";
@@ -21,14 +19,13 @@ import type { UnitOfWorkProvider } from "./unitOfWork";
  * Used for dependency injection.
  */
 export type ApplicationContext = {
-  // Transaction management
+  // Transaction management (repositories are accessed through unitOfWork)
   unitOfWork: UnitOfWorkProvider;
 
   // Document domain ports
   documentListFetcher: DocumentListFetcher;
   documentContentFetcher: DocumentContentFetcher;
   documentParser: DocumentParser;
-  documentRepository: DocumentRepository;
 
   // VectorIndex domain ports
   textSplitter: TextSplitter;
@@ -37,7 +34,6 @@ export type ApplicationContext = {
 
   // Answer domain ports
   answerGenerator: AnswerGenerator;
-  answerRepository?: AnswerRepository; // Optional: can be omitted in initial implementation
 
   // Message domain ports
   messageSender: MessageSender;

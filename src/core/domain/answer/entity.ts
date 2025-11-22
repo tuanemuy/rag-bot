@@ -1,11 +1,12 @@
 import { BusinessRuleError } from "@/core/domain/error";
 import type { DocumentId, SimilarityScore } from "@/core/domain/shared";
 import { AnswerErrorCode } from "./errorCode";
-import type {
-  AnswerContent,
-  AnswerId,
-  AnswerSourceId,
-  Question,
+import {
+  type AnswerContent,
+  type AnswerId,
+  type AnswerSourceId,
+  generateAnswerSourceId,
+  type Question,
 } from "./valueObject";
 
 export type AnswerSource = Readonly<{
@@ -67,7 +68,7 @@ export function createAnswerFromContext(
   generatedAt: Date,
 ): Answer {
   const sources = context.retrievedDocuments.map((doc, index) => ({
-    id: `${id}-source-${index}` as AnswerSourceId,
+    id: generateAnswerSourceId(id, index),
     documentId: doc.documentId,
     documentTitle: doc.title,
     relevantContent: doc.content,

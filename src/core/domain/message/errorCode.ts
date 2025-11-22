@@ -10,6 +10,10 @@ export const MessageErrorCode = {
 
   // EventSourceエラー
   InvalidEventSource: "MESSAGE_INVALID_EVENT_SOURCE",
+
+  // メッセージ内容エラー
+  EmptyMessageContent: "MESSAGE_EMPTY_MESSAGE_CONTENT",
+  EmptyMessages: "MESSAGE_EMPTY_MESSAGES",
 } as const;
 
 export type MessageErrorCode =

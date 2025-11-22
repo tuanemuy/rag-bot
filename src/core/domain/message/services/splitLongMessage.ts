@@ -1,11 +1,12 @@
 const MAX_LENGTH = 5000;
 const MAX_MESSAGES = 5;
+const TRUNCATION_MESSAGE = "\n\n...続きは省略されました";
 
 /**
  * 長文メッセージをLINE APIの制限（5000文字）に合わせて分割する
  *
  * @param text - 分割対象のテキスト
- * @returns 分割されたメッセージの配列（最大5件）
+ * @returns 分割されたメッセージの配列（最大5件）、空文字の場合は空配列
  *
  * 分割アルゴリズム:
  * 1. 5000文字を超える場合、直前の句点（。）または改行（\n）で分割
@@ -14,6 +15,10 @@ const MAX_MESSAGES = 5;
  * 4. 5メッセージを超える場合は末尾に「...続きは省略されました」を付与して打ち切り
  */
 export function splitLongMessage(text: string): string[] {
+  if (text.length === 0) {
+    return [];
+  }
+
   if (text.length <= MAX_LENGTH) {
     return [text];
   }
@@ -46,8 +51,8 @@ export function splitLongMessage(text: string): string[] {
   // 残りがある場合は省略メッセージを付与
   if (remaining.length > 0 && messages.length === MAX_MESSAGES) {
     const lastMessage = messages[MAX_MESSAGES - 1];
-    if (lastMessage.length + 20 <= MAX_LENGTH) {
-      messages[MAX_MESSAGES - 1] = `${lastMessage}\n\n...続きは省略されました`;
+    if (lastMessage.length + TRUNCATION_MESSAGE.length <= MAX_LENGTH) {
+      messages[MAX_MESSAGES - 1] = `${lastMessage}${TRUNCATION_MESSAGE}`;
     }
   }
 

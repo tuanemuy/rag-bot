@@ -1,12 +1,12 @@
-import { BusinessRuleError } from "@/core/domain/error";
 import type { DocumentId } from "@/core/domain/shared";
-import { DocumentErrorCode } from "./errorCode";
-import type {
-  DocumentContent,
-  DocumentFormat,
-  DocumentMetadata,
-  DocumentTitle,
-  DocumentUrl,
+import {
+  createDocumentContent,
+  createDocumentTitle,
+  type DocumentContent,
+  type DocumentFormat,
+  type DocumentMetadata,
+  type DocumentTitle,
+  type DocumentUrl,
 } from "./valueObject";
 
 export type Document = Readonly<{
@@ -24,16 +24,10 @@ export function createDocument(params: {
   metadata: DocumentMetadata;
   fetchedAt: Date;
 }): Document {
-  if (!params.content || params.content.trim() === "") {
-    throw new BusinessRuleError(
-      DocumentErrorCode.EmptyContent,
-      "Document content cannot be empty",
-    );
-  }
   return {
     id: params.id,
-    title: params.title as DocumentTitle,
-    content: params.content as DocumentContent,
+    title: createDocumentTitle(params.title),
+    content: createDocumentContent(params.content),
     metadata: params.metadata,
     fetchedAt: params.fetchedAt,
   };

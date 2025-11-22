@@ -11,7 +11,7 @@ export type VectorIndexEntryId = string & {
 export function createVectorIndexEntryId(value: string): VectorIndexEntryId {
   if (!value || value.trim() === "") {
     throw new BusinessRuleError(
-      VectorIndexErrorCode.InvalidEmbedding,
+      VectorIndexErrorCode.InvalidVectorIndexEntryId,
       "VectorIndexEntryId cannot be empty",
     );
   }
@@ -46,3 +46,31 @@ export type TextSplitterConfig = Readonly<{
   chunkSize: number;
   chunkOverlap: number;
 }>;
+
+export function createTextSplitterConfig(
+  chunkSize: number,
+  chunkOverlap: number,
+): TextSplitterConfig {
+  if (chunkSize <= 0) {
+    throw new BusinessRuleError(
+      VectorIndexErrorCode.InvalidTextSplitterConfig,
+      "chunkSize must be a positive number",
+    );
+  }
+  if (chunkOverlap < 0) {
+    throw new BusinessRuleError(
+      VectorIndexErrorCode.InvalidTextSplitterConfig,
+      "chunkOverlap must be non-negative",
+    );
+  }
+  if (chunkOverlap >= chunkSize) {
+    throw new BusinessRuleError(
+      VectorIndexErrorCode.InvalidTextSplitterConfig,
+      "chunkOverlap must be less than chunkSize",
+    );
+  }
+  return {
+    chunkSize,
+    chunkOverlap,
+  };
+}

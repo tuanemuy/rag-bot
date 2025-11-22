@@ -15,8 +15,11 @@ export type { DocumentParser } from "./ports/documentParser";
 export type { DocumentRepository } from "./ports/documentRepository";
 export {
   type CursorPagination,
+  createDocumentContent,
   createDocumentId,
+  createDocumentTitle,
   createDocumentUrl,
+  createOffsetPagination,
   type DocumentContent,
   type DocumentFormat,
   type DocumentId,

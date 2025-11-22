@@ -16,6 +16,8 @@ export const VectorIndexErrorCode = {
   InvalidTopK: "VECTOR_INDEX_INVALID_TOP_K",
   InvalidEmbedding: "VECTOR_INDEX_INVALID_EMBEDDING",
   InvalidChunkIndex: "VECTOR_INDEX_INVALID_CHUNK_INDEX",
+  InvalidVectorIndexEntryId: "VECTOR_INDEX_INVALID_ENTRY_ID",
+  InvalidTextSplitterConfig: "VECTOR_INDEX_INVALID_TEXT_SPLITTER_CONFIG",
 } as const;
 
 export type VectorIndexErrorCode =

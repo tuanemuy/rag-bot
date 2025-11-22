@@ -16,6 +16,7 @@ export const AnswerErrorCode = {
   // バリデーションエラー
   EmptyQuestion: "ANSWER_EMPTY_QUESTION",
   EmptyContent: "ANSWER_EMPTY_CONTENT",
+  InvalidAnswerId: "ANSWER_INVALID_ANSWER_ID",
 } as const;
 
 export type AnswerErrorCode =

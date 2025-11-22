@@ -6,7 +6,27 @@ export { createDocumentId } from "@/core/domain/shared";
 
 export type DocumentTitle = string & { readonly brand: "DocumentTitle" };
 
+export function createDocumentTitle(value: string): DocumentTitle {
+  if (!value || value.trim() === "") {
+    throw new BusinessRuleError(
+      DocumentErrorCode.EmptyTitle,
+      "Document title cannot be empty",
+    );
+  }
+  return value as DocumentTitle;
+}
+
 export type DocumentContent = string & { readonly brand: "DocumentContent" };
+
+export function createDocumentContent(value: string): DocumentContent {
+  if (!value || value.trim() === "") {
+    throw new BusinessRuleError(
+      DocumentErrorCode.EmptyContent,
+      "Document content cannot be empty",
+    );
+  }
+  return value as DocumentContent;
+}
 
 export type DocumentUrl = string & { readonly brand: "DocumentUrl" };
 
@@ -38,6 +58,37 @@ export type OffsetPagination = Readonly<{
   limit: number;
   total: number;
 }>;
+
+export function createOffsetPagination(
+  offset: number,
+  limit: number,
+  total: number,
+): OffsetPagination {
+  if (offset < 0) {
+    throw new BusinessRuleError(
+      DocumentErrorCode.InvalidPagination,
+      "Offset must be greater than or equal to 0",
+    );
+  }
+  if (limit <= 0) {
+    throw new BusinessRuleError(
+      DocumentErrorCode.InvalidPagination,
+      "Limit must be greater than 0",
+    );
+  }
+  if (total < 0) {
+    throw new BusinessRuleError(
+      DocumentErrorCode.InvalidPagination,
+      "Total must be greater than or equal to 0",
+    );
+  }
+  return {
+    type: "offset",
+    offset,
+    limit,
+    total,
+  };
+}
 
 export type CursorPagination = Readonly<{
   type: "cursor";
