@@ -287,19 +287,16 @@ export async function createPost(
 // DI Container for specific environment
 // ex: src/container.ts
 
-import { getDatabase } from "@/core/adapters/drizzleSqlite/client";
-
-const databaseUrl = env.data.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error("DATABASE_URL is not set");
 }
 
 const db = getDatabase(databaseUrl);
 
-export const container = {
-  unitOfWorkProvider: DrizzleSqliteUnitOfWorkProvider(db),
-  authProvider: new BetterAuthAuthProvider(/* Config */),
-  storageManager: new S3StorageManager(/* S3 client */),
-  // Other adapters...
-};
+export function createContainer(): Container {
+  return {
+    unitOfWork: new DrizzlePgUnitOfWork(db),
+    logger: new ConsoleLogger(),
+  };
+}
 ```

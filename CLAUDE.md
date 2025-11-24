@@ -41,7 +41,7 @@ Hexagonal architecture with domain-driven design principles:
 - **Adapter Layer** (`src/core/adapters/`): Contains concrete implementations for external services
     - `src/core/adapters/${externalServiceProvider}/**.ts`: Adapters for external services like databases, APIs, etc.
 - **Application Layer** (`src/core/application/`): Contains use cases and application services
-    - `src/core/application/context.ts`: Context type for dependency injection
+    - `src/core/application/container.ts`: Container type for dependency injection
     - `src/core/application/${domain}/${usecase}.ts`: Application services that orchestrate domain logic. Each service is a function that takes a context object.
     - `src/core/domain/error.ts`: Error types for business logic
     - `src/core/domain/${domain}/errorCode.ts`: Error codes for each domain
