@@ -25,11 +25,35 @@ export function createUserId(value: string): UserId {
   return value as UserId;
 }
 
+export type GroupId = string & { readonly brand: "GroupId" };
+
+export function createGroupId(value: string): GroupId {
+  if (!value || value.trim() === "") {
+    throw new BusinessRuleError(
+      MessageErrorCode.InvalidEventSource,
+      "GroupId cannot be empty",
+    );
+  }
+  return value as GroupId;
+}
+
+export type RoomId = string & { readonly brand: "RoomId" };
+
+export function createRoomId(value: string): RoomId {
+  if (!value || value.trim() === "") {
+    throw new BusinessRuleError(
+      MessageErrorCode.InvalidEventSource,
+      "RoomId cannot be empty",
+    );
+  }
+  return value as RoomId;
+}
+
 export type EventSource = Readonly<{
   type: "user" | "group" | "room";
   userId?: UserId;
-  groupId?: string;
-  roomId?: string;
+  groupId?: GroupId;
+  roomId?: RoomId;
 }>;
 
 export function createEventSource(params: {
@@ -62,8 +86,8 @@ export function createEventSource(params: {
   return {
     type: params.type,
     userId: params.userId ? createUserId(params.userId) : undefined,
-    groupId: params.groupId,
-    roomId: params.roomId,
+    groupId: params.groupId ? createGroupId(params.groupId) : undefined,
+    roomId: params.roomId ? createRoomId(params.roomId) : undefined,
   };
 }
 
@@ -91,7 +115,7 @@ export type TextMessageContent = Readonly<{
 
 export type MessageContent = TextMessageContent;
 
-const MAX_TEXT_LENGTH = 5000;
+export const MAX_TEXT_LENGTH = 5000;
 
 export function createTextMessageContent(text: string): TextMessageContent {
   if (!text || text.trim() === "") {

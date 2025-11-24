@@ -1,4 +1,5 @@
-const MAX_LENGTH = 5000;
+import { MAX_TEXT_LENGTH } from "../valueObject";
+
 const MAX_MESSAGES = 5;
 const TRUNCATION_MESSAGE = "\n\n...続きは省略されました";
 
@@ -19,7 +20,7 @@ export function splitLongMessage(text: string): string[] {
     return [];
   }
 
-  if (text.length <= MAX_LENGTH) {
+  if (text.length <= MAX_TEXT_LENGTH) {
     return [text];
   }
 
@@ -27,13 +28,13 @@ export function splitLongMessage(text: string): string[] {
   let remaining = text;
 
   while (remaining.length > 0 && messages.length < MAX_MESSAGES) {
-    if (remaining.length <= MAX_LENGTH) {
+    if (remaining.length <= MAX_TEXT_LENGTH) {
       messages.push(remaining);
       break;
     }
 
     // 分割位置を探す
-    const searchRange = remaining.substring(0, MAX_LENGTH);
+    const searchRange = remaining.substring(0, MAX_TEXT_LENGTH);
     const lastPeriod = searchRange.lastIndexOf("。");
     const lastNewline = searchRange.lastIndexOf("\n");
     const splitPos = Math.max(lastPeriod, lastNewline);
@@ -43,8 +44,8 @@ export function splitLongMessage(text: string): string[] {
       remaining = remaining.substring(splitPos + 1);
     } else {
       // 区切り文字がない場合は強制分割
-      messages.push(remaining.substring(0, MAX_LENGTH));
-      remaining = remaining.substring(MAX_LENGTH);
+      messages.push(remaining.substring(0, MAX_TEXT_LENGTH));
+      remaining = remaining.substring(MAX_TEXT_LENGTH);
     }
   }
 
@@ -52,7 +53,7 @@ export function splitLongMessage(text: string): string[] {
   if (remaining.length > 0 && messages.length === MAX_MESSAGES) {
     let lastMessage = messages[MAX_MESSAGES - 1];
     // 省略メッセージ用のスペースを確保
-    const allowedLength = MAX_LENGTH - TRUNCATION_MESSAGE.length;
+    const allowedLength = MAX_TEXT_LENGTH - TRUNCATION_MESSAGE.length;
     if (lastMessage.length > allowedLength) {
       lastMessage = lastMessage.substring(0, allowedLength);
     }

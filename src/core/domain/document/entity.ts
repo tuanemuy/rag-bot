@@ -1,12 +1,11 @@
 import type { DocumentId } from "@/core/domain/shared";
+import type { IndexDocument } from "@/core/domain/vectorIndex/valueObject";
 import {
   createDocumentContent,
   createDocumentTitle,
   type DocumentContent,
-  type DocumentFormat,
   type DocumentMetadata,
   type DocumentTitle,
-  type DocumentUrl,
 } from "./valueObject";
 
 export type Document = Readonly<{
@@ -33,17 +32,6 @@ export function createDocument(params: {
   };
 }
 
-export type DocumentListItem = Readonly<{
-  id: DocumentId;
-  url: DocumentUrl;
-}>;
-
-export type RawDocument = Readonly<{
-  id: DocumentId;
-  format: DocumentFormat;
-  data: string;
-}>;
-
 export type SyncResult = Readonly<{
   totalCount: number;
   successCount: number;
@@ -64,35 +52,12 @@ export function createSyncResult(
 }
 
 /**
- * SyncResultからユーザー通知用メッセージを生成する
+ * DocumentをIndexDocument形式に変換する
  */
-export function createSyncResultMessage(result: SyncResult): string {
-  if (result.failedCount === 0) {
-    // 全件成功
-    return `同期が完了しました。${result.successCount}件のドキュメントを取得しました。`;
-  }
-  if (result.successCount === 0) {
-    // 全件失敗
-    return `同期に失敗しました。全${result.totalCount}件のドキュメント取得に失敗しました。`;
-  }
-  // 部分的成功
-  return (
-    "同期が部分的に完了しました。\n" +
-    `成功: ${result.successCount}件\n` +
-    `失敗: ${result.failedCount}件\n` +
-    `失敗したドキュメントID: ${result.failedIds.slice(0, 5).join(", ")}` +
-    (result.failedIds.length > 5 ? ` 他${result.failedIds.length - 5}件` : "")
-  );
-}
-
-/**
- * インデックス構築結果からユーザー通知用メッセージを生成する
- */
-export function createBuildResultMessage(
-  syncResult: SyncResult,
-  buildResult: { totalEntries: number; buildDuration: number },
-): string {
-  const baseMessage = createSyncResultMessage(syncResult);
-  const indexMessage = `インデックス構築完了: ${buildResult.totalEntries}件のエントリを作成（${Math.round(buildResult.buildDuration / 1000)}秒）`;
-  return `${baseMessage}\n\n${indexMessage}`;
+export function toIndexDocument(document: Document): IndexDocument {
+  return {
+    id: document.id,
+    title: document.title,
+    content: document.content,
+  };
 }

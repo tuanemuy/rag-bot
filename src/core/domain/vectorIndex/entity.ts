@@ -1,7 +1,142 @@
 import { BusinessRuleError } from "@/core/domain/error";
 import type { DocumentId, SimilarityScore } from "@/core/domain/shared";
 import { VectorIndexErrorCode } from "./errorCode";
-import type { Embedding, VectorIndexEntryId } from "./valueObject";
+import {
+  type AnswerContent,
+  type AnswerId,
+  type AnswerSourceId,
+  createAnswerContent,
+  type Embedding,
+  generateAnswerSourceId,
+  type IndexBuildResult,
+  type QueryResult,
+  type Question,
+  type VectorIndexEntryId,
+} from "./valueObject";
+
+// Answer関連のエンティティ
+
+export type AnswerSource = Readonly<{
+  id: AnswerSourceId;
+  documentId: DocumentId;
+  documentTitle: string;
+  relevantContent: string;
+  score: SimilarityScore;
+}>;
+
+export type Answer = Readonly<{
+  id: AnswerId;
+  question: Question;
+  content: AnswerContent;
+  sources: AnswerSource[];
+  generatedAt: Date;
+}>;
+
+export function createAnswer(params: {
+  id: AnswerId;
+  question: Question;
+  content: AnswerContent;
+  sources: AnswerSource[];
+  generatedAt: Date;
+}): Answer {
+  // 値オブジェクト（Question, AnswerContent）は既にファクトリ関数でバリデーション済み
+  // エンティティファクトリでは複数フィールドの相互バリデーションのみを実施
+  return params;
+}
+
+export type RetrievedDocument = Readonly<{
+  documentId: DocumentId;
+  title: string;
+  content: string;
+  score: SimilarityScore;
+}>;
+
+export type RetrievalContext = Readonly<{
+  query: Question;
+  retrievedDocuments: RetrievedDocument[];
+}>;
+
+export function createAnswerFromContext(
+  id: AnswerId,
+  content: AnswerContent,
+  context: RetrievalContext,
+  generatedAt: Date,
+): Answer {
+  const sources = context.retrievedDocuments.map((doc, index) => ({
+    id: generateAnswerSourceId(id, index),
+    documentId: doc.documentId,
+    documentTitle: doc.title,
+    relevantContent: doc.content,
+    score: doc.score,
+  }));
+  return {
+    id,
+    question: context.query,
+    content,
+    sources,
+    generatedAt,
+  };
+}
+
+/**
+ * QueryResultからAnswerを生成する
+ */
+export function createAnswerFromQueryResult(
+  id: AnswerId,
+  question: Question,
+  queryResult: QueryResult,
+  generatedAt: Date,
+): Answer {
+  const sources = queryResult.sources.map((source, index) => ({
+    id: generateAnswerSourceId(id, index),
+    documentId: source.documentId,
+    documentTitle: source.documentTitle,
+    relevantContent: source.relevantContent,
+    score: source.score,
+  }));
+
+  return {
+    id,
+    question,
+    content: createAnswerContent(queryResult.answer),
+    sources,
+    generatedAt,
+  };
+}
+
+/**
+ * 関連ドキュメントが見つからなかった場合のAnswerを生成する
+ */
+export function createNoRelevantDocumentsAnswer(
+  id: AnswerId,
+  question: Question,
+  message: string,
+): Answer {
+  return {
+    id,
+    question,
+    content: createAnswerContent(message),
+    sources: [],
+    generatedAt: new Date(),
+  };
+}
+
+/**
+ * インデックスが未構築の場合のAnswerを生成する
+ */
+export function createIndexNotBuiltAnswer(
+  id: AnswerId,
+  question: Question,
+  message: string,
+): Answer {
+  return {
+    id,
+    question,
+    content: createAnswerContent(message),
+    sources: [],
+    generatedAt: new Date(),
+  };
+}
 
 export type VectorIndexEntry = Readonly<{
   id: VectorIndexEntryId;
@@ -22,6 +157,8 @@ export function createVectorIndexEntry(params: {
   chunkIndex: number;
   createdAt: Date;
 }): VectorIndexEntry {
+  // Embeddingは既にcreateEmbedding()でバリデーション済み
+  // プリミティブ型のフィールドのみエンティティファクトリでチェック
   if (params.chunkIndex < 0) {
     throw new BusinessRuleError(
       VectorIndexErrorCode.InvalidChunkIndex,
@@ -36,26 +173,11 @@ export type SearchResult = Readonly<{
   score: SimilarityScore;
 }>;
 
-export type VectorIndexStatus = Readonly<{
-  entryCount: number;
-  lastUpdatedAt: Date | null;
-}>;
-
-export function isIndexAvailable(status: VectorIndexStatus): boolean {
-  return status.entryCount > 0;
-}
-
-export type VectorIndexBuildResult = Readonly<{
-  totalDocuments: number;
-  totalEntries: number;
-  buildDuration: number;
-}>;
-
 export function createBuildResult(
   totalDocuments: number,
   totalEntries: number,
   startTime: Date,
-): VectorIndexBuildResult {
+): IndexBuildResult {
   return {
     totalDocuments,
     totalEntries,
