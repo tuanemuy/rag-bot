@@ -1,17 +1,14 @@
-import type {
-  Repositories,
-  UnitOfWorkProvider,
-} from "@/core/application/unitOfWork";
-// import { DrizzlePg${Entity}Repository } from "./${entity}Repository";
+import type { Repositories, UnitOfWork } from "@/core/application/unitOfWork";
 import type { Database, Executor } from "./client";
+import { DrizzlePgDocumentRepository } from "./documentRepository";
 
-export class DrizzlePgUnitOfWorkProvider implements UnitOfWorkProvider {
+export class DrizzlePgUnitOfWork implements UnitOfWork {
   constructor(private readonly db: Database) {}
 
   private createRepositories(executor: Executor): Repositories {
     return {
-      // ${entity}Repository: new DrizzlePg${Entity}Repository(executor),
-    } as Repositories;
+      documentRepository: new DrizzlePgDocumentRepository(executor),
+    };
   }
 
   async runInTx<T>(fn: (repositories: Repositories) => Promise<T>): Promise<T> {
