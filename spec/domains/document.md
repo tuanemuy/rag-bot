@@ -37,29 +37,6 @@ function createDocument(params: {
 }
 ```
 
-### DocumentListItem
-
-ドキュメント一覧の各アイテムを表す。
-
-```typescript
-type DocumentListItem = Readonly<{
-  id: DocumentId;
-  url: DocumentUrl;
-}>;
-```
-
-### RawDocument
-
-APIから取得した生のドキュメントを表す。
-
-```typescript
-type RawDocument = Readonly<{
-  id: DocumentId;
-  format: DocumentFormat;
-  data: string;
-}>;
-```
-
 ## 値オブジェクト
 
 ### DocumentId
@@ -105,14 +82,6 @@ function createDocumentUrl(value: string): DocumentUrl {
 }
 ```
 
-### DocumentFormat
-
-ドキュメントの形式。
-
-```typescript
-type DocumentFormat = "json" | "html" | "text";
-```
-
 ### DocumentMetadata
 
 ドキュメントのメタデータ。
@@ -120,7 +89,6 @@ type DocumentFormat = "json" | "html" | "text";
 ```typescript
 type DocumentMetadata = Readonly<{
   sourceUrl: DocumentUrl;
-  format: DocumentFormat;
   additionalData: Readonly<Record<string, string | number | boolean | null>>;
 }>;
 ```
@@ -142,86 +110,9 @@ type DocumentMetadata = Readonly<{
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 type DocumentMetadata = Readonly<{
   sourceUrl: DocumentUrl;
-  format: DocumentFormat;
   additionalData: Readonly<Record<string, JsonValue>>;
 }>;
 ```
-
-### PaginationType
-
-ページネーションの種類。
-
-```typescript
-type PaginationType = "offset" | "cursor";
-```
-
-### OffsetPagination
-
-オフセットベースのページネーション情報。
-
-```typescript
-type OffsetPagination = Readonly<{
-  type: "offset";
-  offset: number;
-  limit: number;
-  total: number;
-}>;
-```
-
-### CursorPagination
-
-カーソルベースのページネーション情報。
-
-```typescript
-type CursorPagination = Readonly<{
-  type: "cursor";
-  cursor: string | null;
-  hasNext: boolean;
-}>;
-```
-
-### ParserConfig
-
-パーサーの設定。各ドキュメント形式のパースに必要な設定を定義する。
-
-```typescript
-/**
- * JSONドキュメントのパース設定
- */
-type JsonParserConfig = Readonly<{
-  format: "json";
-  titlePath: string;        // タイトルを取得するJSONパス
-  contentPath: string;      // コンテンツを取得するJSONパス
-  metadataPath?: string;    // メタデータを取得するJSONパス（オプショナル）
-}>;
-
-/**
- * HTMLドキュメントのパース設定
- */
-type HtmlParserConfig = Readonly<{
-  format: "html";
-  titleSelector: string;    // タイトルを取得するCSSセレクタ
-  contentSelector: string;  // コンテンツを取得するCSSセレクタ
-}>;
-
-/**
- * プレーンテキストドキュメントのパース設定
- */
-type TextParserConfig = Readonly<{
-  format: "text";
-  titleLineCount?: number;  // タイトルとして使用する行数（デフォルト: 1）
-}>;
-
-/**
- * パーサー設定の判別共用体
- */
-type ParserConfig = JsonParserConfig | HtmlParserConfig | TextParserConfig;
-```
-
-**設計意図**:
-- ドメイン層で独立した値オブジェクトとして定義し、外部モジュールへの依存を避ける
-- 判別共用体を使用して各形式の設定を型安全に扱う
-- DIコンテナ生成時に環境変数から読み込んだ設定値をもとにParserConfigを生成し、DocumentParserアダプターに注入する
 
 ## エラーコード
 
@@ -231,15 +122,6 @@ Documentドメインで使用するエラーコード。
 const DocumentErrorCode = {
   // 取得エラー
   FETCH_FAILED: "DOCUMENT_FETCH_FAILED",
-  LIST_FETCH_FAILED: "DOCUMENT_LIST_FETCH_FAILED",
-  CONTENT_FETCH_FAILED: "DOCUMENT_CONTENT_FETCH_FAILED",
-
-  // パースエラー
-  PARSE_FAILED: "DOCUMENT_PARSE_FAILED",
-  INVALID_JSON_FORMAT: "DOCUMENT_INVALID_JSON_FORMAT",
-  INVALID_HTML_FORMAT: "DOCUMENT_INVALID_HTML_FORMAT",
-  FIELD_NOT_FOUND: "DOCUMENT_FIELD_NOT_FOUND",
-  SELECTOR_NOT_FOUND: "DOCUMENT_SELECTOR_NOT_FOUND",
 
   // 永続化エラー
   SAVE_FAILED: "DOCUMENT_SAVE_FAILED",
@@ -254,58 +136,34 @@ type DocumentErrorCode = typeof DocumentErrorCode[keyof typeof DocumentErrorCode
 
 ## ポート
 
-### DocumentListFetcher
+### DocumentSource
 
-ドキュメント一覧を取得するインターフェース。
-
-```typescript
-interface DocumentListFetcher {
-  /**
-   * ドキュメント一覧を取得する（オフセットベース）
-   * リトライ処理はアダプター実装で行う（指数バックオフ）
-   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
-   */
-  fetchWithOffset(offset: number, limit: number): Promise<{
-    items: DocumentListItem[];
-    pagination: OffsetPagination;
-  }>;
-
-  /**
-   * ドキュメント一覧を取得する（カーソルベース）
-   * リトライ処理はアダプター実装で行う（指数バックオフ）
-   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
-   */
-  fetchWithCursor(cursor: string | null): Promise<{
-    items: DocumentListItem[];
-    pagination: CursorPagination;
-  }>;
-}
-```
-
-### DocumentContentFetcher
-
-ドキュメント内容を取得するインターフェース。
+すべてのドキュメントを順次取得するインターフェース。データソース固有の取得・パース処理はアダプター実装に委譲する。
 
 ```typescript
-interface DocumentContentFetcher {
+interface DocumentSource {
   /**
-   * ドキュメント内容を取得する
-   * リトライ処理はアダプター実装で行う（指数バックオフ）
-   * @param item - ドキュメントリストアイテム（id と url を含む）
-   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
+   * すべてのドキュメントを順次取得するイテレータを返す
+   * 取得・パース処理はアダプター実装に依存
+   * @throws SystemError - ドキュメント取得に失敗した場合
    */
-  fetch(item: DocumentListItem): Promise<RawDocument>;
+  iterate(): AsyncIterable<Document>;
 }
 ```
 
 **設計意図**:
-- 引数を`DocumentListItem`とすることで、idとurlを両方渡せる
-- フェッチャーが完全な`RawDocument`（idを含む）を生成できる
-- 呼び出し元でidを付与する必要がなくなり、シンプルな設計になる
+- アプリケーション層がデータソースの詳細（API形式、ページネーション、パース方法）を知る必要がない
+- 異なるデータソースを統一的なインターフェースで扱える
+- AsyncIterableを使用することでメモリ効率が良い
+
+**アダプター実装例**:
+- `HttpSitemapDocumentSource`: sitemapをパース → 各URLからHTML取得 → CSSセレクタでパース
+- `NotionDocumentSource`: Notion APIを呼び出し → Notion形式をパース
+- `FileSystemDocumentSource`: ディレクトリを走査 → ファイルを読み込み・パース
 
 #### リトライポリシー
 
-DocumentListFetcherおよびDocumentContentFetcherのアダプター実装は、以下のリトライポリシーに従う。
+DocumentSourceのアダプター実装は、以下のリトライポリシーに従う。
 
 - **リトライ対象エラー**: ネットワークエラー、5xx系サーバーエラー、429 Too Many Requests
 - **リトライ対象外**: 4xx系クライアントエラー（400, 401, 403, 404など）
@@ -322,20 +180,6 @@ DocumentListFetcherおよびDocumentContentFetcherのアダプター実装は、
 // attempt 2: 2000ms
 // attempt 3: 4000ms (maxDelayMsで上限)
 delay = min(initialDelayMs * (backoffMultiplier ^ (attempt - 1)), maxDelayMs)
-```
-
-### DocumentParser
-
-ドキュメントをパースするインターフェース。
-
-```typescript
-interface DocumentParser {
-  /**
-   * 生のドキュメントをパースして構造化する
-   * @throws ValidationError - パースに失敗した場合
-   */
-  parse(rawDocument: RawDocument, config: ParserConfig): Document;
-}
 ```
 
 ### DocumentRepository
@@ -438,6 +282,6 @@ function createBuildResultMessage(
 
 ## アプリケーション層での利用
 
-ポートの呼び出しはアプリケーション層が行う。Documentドメインのポートを使用した処理フローはSyncAndBuildIndexユースケース（`spec/domains/index.md`参照）を参照。
+ポートの呼び出しはアプリケーション層が行う。Documentドメインのポートを使用した処理フローはSyncAndBuildIndexユースケース（`spec/usecases.md`参照）を参照。
 
 **注意**: エンティティ・値オブジェクトのファクトリ関数（createDocument, createDocumentUrl等）がバリデーションを含むビジネスロジックを担当する。複数の集約にまたがる複雑なロジックが必要な場合のみドメインサービスを追加する。

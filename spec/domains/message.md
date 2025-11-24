@@ -47,11 +47,29 @@ type UserId = string & { readonly brand: "UserId" };
 Webhookイベントの送信元情報。Push API送信時の送信先特定に使用する。
 
 ```typescript
+// GroupIdとRoomIdもBranded型として定義
+type GroupId = string & { readonly brand: "GroupId" };
+type RoomId = string & { readonly brand: "RoomId" };
+
+function createGroupId(value: string): GroupId {
+  if (!value || value.trim() === "") {
+    throw new BusinessRuleError("INVALID_EVENT_SOURCE", "GroupId cannot be empty");
+  }
+  return value as GroupId;
+}
+
+function createRoomId(value: string): RoomId {
+  if (!value || value.trim() === "") {
+    throw new BusinessRuleError("INVALID_EVENT_SOURCE", "RoomId cannot be empty");
+  }
+  return value as RoomId;
+}
+
 type EventSource = Readonly<{
   type: "user" | "group" | "room";
   userId?: UserId;
-  groupId?: string;
-  roomId?: string;
+  groupId?: GroupId;
+  roomId?: RoomId;
 }>;
 
 function createEventSource(params: {
@@ -74,9 +92,9 @@ function createEventSource(params: {
   }
   return {
     type: params.type,
-    userId: params.userId as UserId | undefined,
-    groupId: params.groupId,
-    roomId: params.roomId,
+    userId: params.userId ? createUserId(params.userId) : undefined,
+    groupId: params.groupId ? createGroupId(params.groupId) : undefined,
+    roomId: params.roomId ? createRoomId(params.roomId) : undefined,
   };
 }
 
@@ -84,14 +102,43 @@ function getEventSourceDestination(source: EventSource): string {
   // Push API用の送信先IDを取得
   switch (source.type) {
     case "user":
-      return source.userId!;
+      return source.userId as string;
     case "group":
-      return source.groupId!;
+      return source.groupId as string;
     case "room":
-      return source.roomId!;
+      return source.roomId as string;
+    default:
+      throw new BusinessRuleError("INVALID_EVENT_SOURCE", `Unknown event source type: ${source.type}`);
   }
 }
 ```
+
+**使用場面**:
+
+EventSourceは以下のフローで使用される:
+
+1. **プレゼンテーション層**: Webhookイベントからソース情報を抽出し、`createEventSource`でEventSourceを生成
+2. **ユースケースへの受け渡し**: UC-SYNC-001等の非同期処理を行うユースケースにEventSourceを渡す
+3. **Push通知の送信**: 非同期処理完了後、`getEventSourceDestination`で送信先IDを取得し、MessageSender.pushで通知
+
+```typescript
+// プレゼンテーション層での使用例
+const eventSource = createEventSource({
+  type: webhookEvent.source.type,
+  userId: webhookEvent.source.userId,
+  groupId: webhookEvent.source.groupId,
+  roomId: webhookEvent.source.roomId,
+});
+
+// ユースケースに渡す
+await syncAndBuildIndex(eventSource, replyToken, context);
+
+// ユースケース内での使用例（Push通知）
+const destination = getEventSourceDestination(eventSource);
+await context.messageSender.push(destination, [{ type: "text", text: "同期が完了しました" }]);
+```
+
+**関連ユースケース**: UC-SYNC-001（ドキュメントを同期する）
 
 ### MessageContent
 
