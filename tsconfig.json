@@ -1,21 +1,25 @@
 {
-  "include": ["**/*"],
-  "exclude": ["node_modules"],
   "compilerOptions": {
-    "lib": ["ESNext"],
-    "types": ["node", "vite/client"],
-    "target": "ESNext",
-    "module": "ESNext",
+    "target": "esnext",
+    "lib": ["es2023"],
+    "moduleDetection": "force",
+    "module": "preserve",
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    },
-    "esModuleInterop": true,
-    "verbatimModuleSyntax": true,
-    "noEmit": true,
-    "resolveJsonModule": true,
-    "skipLibCheck": true,
-    "strict": true
-  }
+    }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules"]
 }

@@ -1,1 +1,1 @@
-# RAG with LINE bot
+# RAG bot
