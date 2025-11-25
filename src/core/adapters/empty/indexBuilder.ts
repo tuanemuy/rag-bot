@@ -6,7 +6,7 @@ import type {
 } from "@/core/domain/vectorIndex/valueObject";
 
 export class EmptyIndexBuilder implements IndexBuilder {
-  async buildIndex(_documents: IndexDocument[]): Promise<IndexBuildResult> {
+  async addDocuments(_documents: IndexDocument[]): Promise<IndexBuildResult> {
     return {
       totalDocuments: 0,
       totalEntries: 0,
@@ -20,8 +20,6 @@ export class EmptyIndexBuilder implements IndexBuilder {
 
   async getStatus(): Promise<IndexStatus> {
     return {
-      entryCount: 0,
-      lastUpdatedAt: null,
       isAvailable: false,
     };
   }

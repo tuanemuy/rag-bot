@@ -19,10 +19,13 @@ export class ConsoleLogger implements Logger {
     error?: unknown,
     context?: Record<string, unknown>,
   ): void {
-    const errorContext = error
-      ? { ...context, error: this.serializeError(error) }
-      : context;
-    console.error(this.formatMessage("ERROR", message, errorContext));
+    const formattedMessage = this.formatMessage("ERROR", message, context);
+    if (error !== undefined) {
+      // Pass error object directly to console.error so it can format the stack trace properly
+      console.error(formattedMessage, error);
+    } else {
+      console.error(formattedMessage);
+    }
   }
 
   debug(message: string, context?: Record<string, unknown>): void {
@@ -40,16 +43,5 @@ export class ConsoleLogger implements Logger {
       return `${base} ${JSON.stringify(context)}`;
     }
     return base;
-  }
-
-  private serializeError(error: unknown): unknown {
-    if (error instanceof Error) {
-      return {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      };
-    }
-    return error;
   }
 }

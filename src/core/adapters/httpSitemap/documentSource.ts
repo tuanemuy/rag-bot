@@ -31,6 +31,12 @@ export type HttpSitemapDocumentSourceConfig = Readonly<{
   timeout?: number;
   /** ドキュメント取得エラー時の振る舞い */
   onError?: OnDocumentError;
+  /** リクエスト間の待機時間（ミリ秒） */
+  requestDelay?: number;
+  /** 最大再試行回数 */
+  maxRetries?: number;
+  /** 再試行時の初期待機時間（ミリ秒） */
+  retryDelay?: number;
 }>;
 
 /**
@@ -46,6 +52,9 @@ export class HttpSitemapDocumentSource implements DocumentSource {
       titleSelector: config.titleSelector,
       timeout: config.timeout ?? 30000,
       onError: config.onError ?? "throw",
+      requestDelay: config.requestDelay ?? 0,
+      maxRetries: config.maxRetries ?? 3,
+      retryDelay: config.retryDelay ?? 1000,
     };
   }
 
@@ -58,6 +67,11 @@ export class HttpSitemapDocumentSource implements DocumentSource {
       try {
         const document = await this.fetchAndParseDocument(url);
         yield document;
+
+        // レート制限
+        if (this.config.requestDelay > 0) {
+          await this.delay(this.config.requestDelay);
+        }
       } catch (error) {
         if (this.config.onError === "throw") {
           throw error;
@@ -86,7 +100,7 @@ export class HttpSitemapDocumentSource implements DocumentSource {
   private async fetchSitemapUrlsRecursively(
     sitemapUrl: string,
   ): Promise<string[]> {
-    const response = await this.fetchWithTimeout(sitemapUrl);
+    const response = await this.fetchWithRetry(sitemapUrl);
 
     if (!response.ok) {
       throw new SystemError(
@@ -142,7 +156,7 @@ export class HttpSitemapDocumentSource implements DocumentSource {
    * 指定URLからHTMLを取得してドキュメントをパース
    */
   private async fetchAndParseDocument(url: string): Promise<Document> {
-    const response = await this.fetchWithTimeout(url);
+    const response = await this.fetchWithRetry(url);
 
     if (!response.ok) {
       throw new SystemError(
@@ -195,6 +209,36 @@ export class HttpSitemapDocumentSource implements DocumentSource {
     }
 
     return elements.map((el) => domutils.textContent(el).trim()).join("\n\n");
+  }
+
+  /**
+   * 指定時間待機
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 再試行付きfetch
+   */
+  private async fetchWithRetry(url: string): Promise<Response> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+      try {
+        return await this.fetchWithTimeout(url);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (attempt < this.config.maxRetries) {
+          // exponential backoff
+          const delayMs = this.config.retryDelay * 2 ** attempt;
+          await this.delay(delayMs);
+        }
+      }
+    }
+
+    throw lastError;
   }
 
   /**

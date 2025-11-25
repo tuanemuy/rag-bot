@@ -1,11 +1,5 @@
-import {
-  type GEMINI_EMBEDDING_MODEL,
-  type GEMINI_MODEL,
-  Gemini,
-  GeminiEmbedding,
-} from "@llamaindex/google";
-import { PGVectorStore } from "@llamaindex/postgres";
-import { MetadataMode, Settings, VectorStoreIndex } from "llamaindex";
+import type { PGVectorStore } from "@llamaindex/postgres";
+import { MetadataMode, VectorStoreIndex } from "llamaindex";
 import {
   NotFoundError,
   NotFoundErrorCode,
@@ -20,50 +14,11 @@ import type {
   QuerySource,
 } from "@/core/domain/vectorIndex/valueObject";
 
-export type LlamaIndexGeminiQueryEngineConfig = {
-  geminiApiKey: string;
-  databaseUrl: string;
-  embeddingModel?: string;
-  llmModel?: string;
-  chunkSize?: number;
-  chunkOverlap?: number;
-  tableName?: string;
-  schemaName?: string;
-};
-
 /**
  * LlamaIndex + Geminiを使用したQueryEngine実装
  */
 export class LlamaIndexGeminiQueryEngine implements QueryEngine {
-  private vectorStore: PGVectorStore;
-
-  constructor(config: LlamaIndexGeminiQueryEngineConfig) {
-    // Gemini LLMの設定
-    Settings.llm = new Gemini({
-      model: (config.llmModel ?? "gemini-1.5-flash") as GEMINI_MODEL,
-      apiKey: config.geminiApiKey,
-    });
-
-    // Gemini Embeddingの設定
-    Settings.embedModel = new GeminiEmbedding({
-      model: (config.embeddingModel ??
-        "text-embedding-004") as GEMINI_EMBEDDING_MODEL,
-      apiKey: config.geminiApiKey,
-    });
-
-    // チャンクサイズの設定
-    Settings.chunkSize = config.chunkSize ?? 1000;
-    Settings.chunkOverlap = config.chunkOverlap ?? 200;
-
-    // PGVectorStoreの初期化
-    this.vectorStore = new PGVectorStore({
-      clientConfig: {
-        connectionString: config.databaseUrl,
-      },
-      schemaName: config.schemaName ?? "public",
-      tableName: config.tableName ?? "llamaindex_vectors",
-    });
-  }
+  constructor(private readonly vectorStore: PGVectorStore) {}
 
   async query(question: string, topK: number): Promise<QueryResult> {
     try {
@@ -113,7 +68,7 @@ export class LlamaIndexGeminiQueryEngine implements QueryEngine {
         throw error;
       }
       throw new SystemError(
-        SystemErrorCode.InternalServerError,
+        SystemErrorCode.IndexQueryFailed,
         "Failed to query index",
         error,
       );

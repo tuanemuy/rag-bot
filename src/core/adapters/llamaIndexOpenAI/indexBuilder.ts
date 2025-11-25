@@ -17,71 +17,70 @@ import {
   type LlamaIndexOpenAIConfig,
 } from "./setup";
 
-export type LlamaIndexOpenAIIndexBuilderConfig = LlamaIndexOpenAIConfig;
+export type LlamaIndexOpenAIIndexBuilderConfig = LlamaIndexOpenAIConfig & {
+  /** 最大再試行回数 */
+  maxRetries?: number;
+  /** 再試行時の初期待機時間（ミリ秒） */
+  retryDelay?: number;
+};
 
 /**
  * LlamaIndex + OpenAIを使用したIndexBuilder実装
  */
 export class LlamaIndexOpenAIIndexBuilder implements IndexBuilder {
   private vectorStore: PGVectorStore;
+  private readonly maxRetries: number;
+  private readonly retryDelay: number;
 
   constructor(private readonly config: LlamaIndexOpenAIIndexBuilderConfig) {
     initializeLlamaIndexSettings(config);
     this.vectorStore = createPGVectorStore(config);
+    this.maxRetries = config.maxRetries ?? 3;
+    this.retryDelay = config.retryDelay ?? 1000;
   }
 
-  async buildIndex(documents: IndexDocument[]): Promise<IndexBuildResult> {
+  async addDocuments(documents: IndexDocument[]): Promise<IndexBuildResult> {
     const startTime = Date.now();
 
-    try {
-      // 既存のインデックスをクリア
-      await this.clearIndex();
-
-      // LlamaIndex用のDocumentに変換
-      const llamaDocuments = documents.map(
-        (doc) =>
-          new Document({
-            text: doc.content,
-            id_: doc.id,
-            metadata: {
-              documentId: doc.id,
-              title: doc.title,
-            },
-          }),
-      );
-
-      // ストレージコンテキストを作成
-      const storageContext = await storageContextFromDefaults({
-        vectorStore: this.vectorStore,
-      });
-
-      // インデックスを構築
-      await VectorStoreIndex.fromDocuments(llamaDocuments, {
-        storageContext,
-      });
-
-      // エントリ数を取得（概算）
-      const avgChunksPerDoc = Math.ceil(
-        documents.reduce((sum, doc) => sum + doc.content.length, 0) /
-          documents.length /
-          (this.config.chunkSize ?? 1000),
-      );
-      const estimatedEntries = documents.length * avgChunksPerDoc;
-
-      const buildDuration = Date.now() - startTime;
-
+    if (documents.length === 0) {
       return {
-        totalDocuments: documents.length,
-        totalEntries: estimatedEntries,
-        buildDuration,
+        totalDocuments: 0,
+        totalEntries: 0,
+        buildDuration: 0,
       };
-    } catch (error) {
-      throw new SystemError(
-        SystemErrorCode.InternalServerError,
-        "Failed to build index",
-        error,
-      );
     }
+
+    // LlamaIndex用のDocumentに変換
+    const llamaDocuments = documents.map(
+      (doc) =>
+        new Document({
+          text: doc.content,
+          id_: doc.id,
+          metadata: {
+            documentId: doc.id,
+            title: doc.title,
+          },
+        }),
+    );
+
+    // リトライ付きでインデックスに追加
+    await this.addDocumentsWithRetry(llamaDocuments);
+
+    // エントリ数を取得（概算）
+    const avgChunksPerDoc = Math.ceil(
+      documents.reduce((sum, doc) => sum + doc.content.length, 0) /
+        documents.length /
+        (this.config.chunkSize ?? 1000),
+    );
+    const estimatedEntries = documents.length * avgChunksPerDoc;
+
+    const buildDuration = Date.now() - startTime;
+
+    return {
+      totalDocuments: documents.length,
+      totalEntries: estimatedEntries,
+      buildDuration,
+    };
   }
 
   async getStatus(): Promise<IndexStatus> {
@@ -92,7 +91,6 @@ export class LlamaIndexOpenAIIndexBuilder implements IndexBuilder {
       });
 
       let entryCount = 0;
-      let lastUpdatedAt: Date | null = null;
 
       try {
         await client.connect();
@@ -106,11 +104,6 @@ export class LlamaIndexOpenAIIndexBuilder implements IndexBuilder {
           `SELECT COUNT(*) as count FROM "${escapedSchema}"."${escapedTable}"`,
         );
         entryCount = Number.parseInt(countResult.rows[0].count, 10);
-
-        // lastUpdatedAtはDocumentRepositoryの最大fetchedAtから取得するべきなので
-        // IndexBuilder単体では正確な値を返せない。nullを返し、必要に応じて
-        // アプリケーション層でDocumentRepositoryから取得して補完する。
-        lastUpdatedAt = null;
       } catch {
         entryCount = 0;
       } finally {
@@ -118,13 +111,11 @@ export class LlamaIndexOpenAIIndexBuilder implements IndexBuilder {
       }
 
       return {
-        entryCount,
-        lastUpdatedAt,
         isAvailable: entryCount > 0,
       };
     } catch (error) {
       throw new SystemError(
-        SystemErrorCode.InternalServerError,
+        SystemErrorCode.IndexStatusFailed,
         "Failed to get index status",
         error,
       );
@@ -154,10 +145,56 @@ export class LlamaIndexOpenAIIndexBuilder implements IndexBuilder {
       }
     } catch (error) {
       throw new SystemError(
-        SystemErrorCode.InternalServerError,
+        SystemErrorCode.IndexClearFailed,
         "Failed to clear index",
         error,
       );
     }
+  }
+
+  /**
+   * リトライ付きでドキュメントをインデックスに追加
+   */
+  private async addDocumentsWithRetry(
+    llamaDocuments: Document[],
+  ): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        // ストレージコンテキストを作成
+        const storageContext = await storageContextFromDefaults({
+          vectorStore: this.vectorStore,
+        });
+
+        // インデックスにドキュメントを追加
+        await VectorStoreIndex.fromDocuments(llamaDocuments, {
+          storageContext,
+        });
+
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (attempt < this.maxRetries) {
+          // exponential backoff
+          const delayMs = this.retryDelay * 2 ** attempt;
+          await this.delay(delayMs);
+        }
+      }
+    }
+
+    throw new SystemError(
+      SystemErrorCode.IndexAddFailed,
+      "Failed to add documents to index",
+      lastError,
+    );
+  }
+
+  /**
+   * 指定時間待機
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

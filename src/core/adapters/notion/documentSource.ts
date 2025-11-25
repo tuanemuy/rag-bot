@@ -25,6 +25,8 @@ export type NotionDocumentSourceConfig = Readonly<{
   timeout?: number;
   /** ドキュメント取得エラー時の振る舞い */
   onError?: OnDocumentError;
+  /** リクエスト間の待機時間（ミリ秒） */
+  requestDelay?: number;
   /** リトライ回数（デフォルト: 3） */
   maxRetries?: number;
 }>;
@@ -86,6 +88,7 @@ export class NotionDocumentSource implements DocumentSource {
       databaseId: config.databaseId,
       timeout: config.timeout ?? 30000,
       onError: config.onError ?? "throw",
+      requestDelay: config.requestDelay ?? 0,
       maxRetries: config.maxRetries ?? 3,
     };
   }
@@ -99,6 +102,11 @@ export class NotionDocumentSource implements DocumentSource {
       try {
         const document = await this.fetchPageContent(page);
         yield document;
+
+        // レート制限
+        if (this.config.requestDelay > 0) {
+          await this.sleep(this.config.requestDelay);
+        }
       } catch (error) {
         if (this.config.onError === "throw") {
           throw error;
@@ -388,7 +396,7 @@ export class NotionDocumentSource implements DocumentSource {
           }
 
           throw new SystemError(
-            SystemErrorCode.NetworkError,
+            SystemErrorCode.RateLimitExceeded,
             `Rate limit exceeded for ${url} after ${this.config.maxRetries} retries`,
           );
         }

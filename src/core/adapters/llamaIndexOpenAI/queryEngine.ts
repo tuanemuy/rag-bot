@@ -80,7 +80,7 @@ export class LlamaIndexOpenAIQueryEngine implements QueryEngine {
         throw error;
       }
       throw new SystemError(
-        SystemErrorCode.InternalServerError,
+        SystemErrorCode.IndexQueryFailed,
         "Failed to query index",
         error,
       );

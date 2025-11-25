@@ -3,7 +3,6 @@ export {
   type LlamaIndexGeminiIndexBuilderConfig,
 } from "./indexBuilder";
 
-export {
-  LlamaIndexGeminiQueryEngine,
-  type LlamaIndexGeminiQueryEngineConfig,
-} from "./queryEngine";
+export { LlamaIndexGeminiQueryEngine } from "./queryEngine";
+
+export { initializeLlamaIndex, type LlamaIndexGeminiConfig } from "./setup";
