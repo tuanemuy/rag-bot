@@ -1,17 +1,15 @@
-import { getDatabase } from "@/core/adapters/drizzlePg/client";
-import { DrizzlePgUnitOfWork } from "@/core/adapters/drizzlePg/unitOfWork";
 import { HttpSitemapDocumentSource } from "@/core/adapters/httpSitemap/documentSource";
+import { LineApiClient } from "@/core/adapters/line/lineApiClient";
+import { LineUserNotifier } from "@/core/adapters/line/lineUserNotifier";
 import { LineMessageSender } from "@/core/adapters/line/messageSender";
+import { jaMessages } from "@/core/adapters/line/messages/ja";
 import {
+  initializeLlamaIndex,
   LlamaIndexGeminiIndexBuilder,
   LlamaIndexGeminiQueryEngine,
 } from "@/core/adapters/llamaIndexGemini";
-import {
-  LlamaIndexOpenAIIndexBuilder,
-  LlamaIndexOpenAIQueryEngine,
-} from "@/core/adapters/llamaIndexOpenAI";
 import { ConsoleLogger } from "@/core/adapters/simple/consoleLogger";
-import type { AppConfig, Container } from "@/core/application/container";
+import type { Container } from "@/core/application/container";
 import type { IndexBuilder } from "@/core/domain/vectorIndex/ports/indexBuilder";
 import type { QueryEngine } from "@/core/domain/vectorIndex/ports/queryEngine";
 
@@ -25,88 +23,118 @@ export function withContainer<T extends unknown[], K>(
 }
 
 export function createContainer(): Container {
-  // Get configuration from environment variables
-  const llmProvider = process.env.LLM_PROVIDER ?? "gemini";
-  const config: AppConfig = {
-    appUrl: process.env.APP_URL,
-    databaseUrl: process.env.DATABASE_URL,
-    llmProvider: llmProvider as "openai" | "gemini",
-    openaiApiKey: process.env.OPENAI_API_KEY,
-    geminiApiKey: process.env.GEMINI_API_KEY,
-  };
-
-  // Create database instance
-  const db = getDatabase(config.databaseUrl);
-
   // Create adapters
-  const unitOfWork = new DrizzlePgUnitOfWork(db);
   const logger = new ConsoleLogger();
 
-  // Create LLM adapters based on provider
-  const { indexBuilder, queryEngine } = createLLMAdapters(config);
+  // Create LLM adapters (Gemini)
+  const { indexBuilder, queryEngine } = createGeminiAdapters();
 
   // Create document source adapter (HTTP Sitemap)
   const documentSource = new HttpSitemapDocumentSource({
     sitemapUrl: process.env.DOCUMENT_SITEMAP_URL,
     contentSelector: process.env.DOCUMENT_CONTENT_SELECTOR,
     titleSelector: process.env.DOCUMENT_TITLE_SELECTOR,
+    timeout: process.env.DOCUMENT_FETCH_TIMEOUT
+      ? Number.parseInt(process.env.DOCUMENT_FETCH_TIMEOUT, 10)
+      : undefined,
+    onError: process.env.DOCUMENT_ON_ERROR as
+      | "throw"
+      | "skip"
+      | "warn"
+      | undefined,
+    requestDelay: process.env.DOCUMENT_REQUEST_DELAY
+      ? Number.parseInt(process.env.DOCUMENT_REQUEST_DELAY, 10)
+      : undefined,
+    maxRetries: process.env.DOCUMENT_MAX_RETRIES
+      ? Number.parseInt(process.env.DOCUMENT_MAX_RETRIES, 10)
+      : undefined,
+    retryDelay: process.env.DOCUMENT_RETRY_DELAY
+      ? Number.parseInt(process.env.DOCUMENT_RETRY_DELAY, 10)
+      : undefined,
   });
 
-  // Create message sender
-  const messageSender = new LineMessageSender({
-    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN ?? "",
+  // Create LINE API client (shared by MessageSender and UserNotifier)
+  const lineApiClient = new LineApiClient({
+    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+    maxRetries: process.env.LINE_MAX_RETRIES
+      ? Number.parseInt(process.env.LINE_MAX_RETRIES, 10)
+      : undefined,
+    initialDelayMs: process.env.LINE_RETRY_DELAY
+      ? Number.parseInt(process.env.LINE_RETRY_DELAY, 10)
+      : undefined,
+    maxDelayMs: process.env.LINE_MAX_DELAY_MS
+      ? Number.parseInt(process.env.LINE_MAX_DELAY_MS, 10)
+      : undefined,
+    backoffMultiplier: process.env.LINE_BACKOFF_MULTIPLIER
+      ? Number.parseFloat(process.env.LINE_BACKOFF_MULTIPLIER)
+      : undefined,
   });
+
+  // Create message sender and user notifier
+  const messageSender = new LineMessageSender(lineApiClient);
+  const userNotifier = new LineUserNotifier(lineApiClient, jaMessages);
 
   return {
-    config,
-    unitOfWork,
+    config: {
+      syncBatchSize: process.env.SYNC_BATCH_SIZE
+        ? Number.parseInt(process.env.SYNC_BATCH_SIZE, 10)
+        : 100,
+    },
     logger,
     documentSource,
     indexBuilder,
     queryEngine,
     messageSender,
+    userNotifier,
   };
 }
 
 /**
- * Create LLM adapters based on the configured provider
+ * Create Gemini LLM adapters
  */
-function createLLMAdapters(config: AppConfig): {
+function createGeminiAdapters(): {
   indexBuilder: IndexBuilder;
   queryEngine: QueryEngine;
 } {
-  if (config.llmProvider === "gemini") {
-    if (!config.geminiApiKey) {
-      throw new Error(
-        "GEMINI_API_KEY is required when LLM_PROVIDER is set to gemini",
-      );
-    }
+  const databaseUrl = process.env.DATABASE_URL;
+  const geminiApiKey = process.env.GEMINI_API_KEY;
 
-    const geminiConfig = {
-      geminiApiKey: config.geminiApiKey,
-      databaseUrl: config.databaseUrl,
-    };
-
-    return {
-      indexBuilder: new LlamaIndexGeminiIndexBuilder(geminiConfig),
-      queryEngine: new LlamaIndexGeminiQueryEngine(geminiConfig),
-    };
+  if (!geminiApiKey) {
+    throw new Error("GEMINI_API_KEY is required");
   }
 
-  // Default to OpenAI
-  if (!config.openaiApiKey) {
-    throw new Error(
-      "OPENAI_API_KEY is required when LLM_PROVIDER is set to openai",
-    );
-  }
+  const chunkSize = process.env.LLM_CHUNK_SIZE
+    ? Number.parseInt(process.env.LLM_CHUNK_SIZE, 10)
+    : undefined;
+  const tableName = process.env.VECTOR_TABLE_NAME;
+  const schemaName = process.env.VECTOR_SCHEMA_NAME;
 
-  const openaiConfig = {
-    openaiApiKey: config.openaiApiKey,
-    databaseUrl: config.databaseUrl,
+  const geminiConfig = {
+    geminiApiKey,
+    databaseUrl,
+    embeddingModel: process.env.GEMINI_EMBEDDING_MODEL,
+    llmModel: process.env.GEMINI_LLM_MODEL,
+    chunkSize,
+    chunkOverlap: process.env.LLM_CHUNK_OVERLAP
+      ? Number.parseInt(process.env.LLM_CHUNK_OVERLAP, 10)
+      : undefined,
+    tableName,
+    schemaName,
   };
 
+  // Initialize LlamaIndex settings and create shared vector store
+  const vectorStore = initializeLlamaIndex(geminiConfig);
+
   return {
-    indexBuilder: new LlamaIndexOpenAIIndexBuilder(openaiConfig),
-    queryEngine: new LlamaIndexOpenAIQueryEngine(openaiConfig),
+    indexBuilder: new LlamaIndexGeminiIndexBuilder(vectorStore, {
+      chunkSize,
+      maxRetries: process.env.INDEX_BUILDER_MAX_RETRIES
+        ? Number.parseInt(process.env.INDEX_BUILDER_MAX_RETRIES, 10)
+        : undefined,
+      retryDelay: process.env.INDEX_BUILDER_RETRY_DELAY
+        ? Number.parseInt(process.env.INDEX_BUILDER_RETRY_DELAY, 10)
+        : undefined,
+    }),
+    queryEngine: new LlamaIndexGeminiQueryEngine(vectorStore),
   };
 }

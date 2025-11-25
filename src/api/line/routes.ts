@@ -13,20 +13,39 @@ import type { MessageEvent, WebhookEvent } from "./schema";
 /**
  * コマンドタイプ
  */
-type CommandType = "sync" | "status" | "question";
+type CommandType = "sync" | "status" | "question" | "message";
 
 /**
  * テキストメッセージをコマンドタイプに分類する
  */
 function parseCommand(text: string): CommandType {
-  const trimmed = text.trim().toLowerCase();
-  if (trimmed === "sync") {
+  const trimmed = text.trim();
+  const lowerTrimmed = trimmed.toLowerCase();
+
+  if (lowerTrimmed === "sync") {
     return "sync";
   }
-  if (trimmed === "status") {
+  if (lowerTrimmed === "status") {
     return "status";
   }
-  return "question";
+  if (trimmed.startsWith("query:") || trimmed.startsWith("Query:")) {
+    return "question";
+  }
+  return "message";
+}
+
+/**
+ * "query:" プレフィックスを除去して質問テキストを抽出する
+ */
+function extractQuestionText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("query:")) {
+    return trimmed.slice(6).trim();
+  }
+  if (trimmed.startsWith("Query:")) {
+    return trimmed.slice(6).trim();
+  }
+  return trimmed;
 }
 
 export const lineRoutes = new Hono<LineHonoEnv>();
@@ -131,10 +150,20 @@ async function handleMessageEvent(
 
     case "question": {
       // 質問: RAGで回答を生成して返信
+      const questionText = extractQuestionText(message.text);
       await answerQuestion(container, {
         replyToken: createReplyToken(replyToken),
-        questionText: message.text,
+        questionText,
         topK: 5,
+      });
+      break;
+    }
+
+    case "message": {
+      // 通常のメッセージ: ログのみ
+      container.logger.info("Regular message received, ignoring", {
+        text: message.text,
+        source,
       });
       break;
     }
