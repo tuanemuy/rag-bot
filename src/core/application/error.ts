@@ -142,6 +142,12 @@ export const SystemErrorCode = {
   DatabaseError: "DATABASE_ERROR",
   DataInconsistency: "DATA_INCONSISTENCY",
   NetworkError: "NETWORK_ERROR",
+  RateLimitExceeded: "RATE_LIMIT_EXCEEDED",
+  // Index-related error codes
+  IndexAddFailed: "INDEX_ADD_FAILED",
+  IndexClearFailed: "INDEX_CLEAR_FAILED",
+  IndexQueryFailed: "INDEX_QUERY_FAILED",
+  IndexStatusFailed: "INDEX_STATUS_FAILED",
   // Other system-level error codes can be added here
 } as const;
 export type SystemErrorCode =

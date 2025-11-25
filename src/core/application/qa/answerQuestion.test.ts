@@ -5,7 +5,7 @@ import {
   EmptyLogger,
   EmptyMessageSender,
   EmptyQueryEngine,
-  EmptyUnitOfWork,
+  EmptyUserNotifier,
 } from "@/core/adapters/empty";
 import type { Container } from "@/core/application/container";
 import { SystemError } from "@/core/application/error";
@@ -19,17 +19,14 @@ import { type AnswerQuestionInput, answerQuestion } from "./answerQuestion";
 function createTestContainer(): Container {
   return {
     config: {
-      appUrl: "http://localhost:3000",
-      databaseUrl: "postgresql://localhost:5432/test",
-      llmProvider: "openai",
-      openaiApiKey: "test-api-key",
+      syncBatchSize: 100,
     },
-    unitOfWork: new EmptyUnitOfWork(),
     logger: new EmptyLogger(),
     documentSource: new EmptyDocumentSource(),
     indexBuilder: new EmptyIndexBuilder(),
     queryEngine: new EmptyQueryEngine(),
     messageSender: new EmptyMessageSender(),
+    userNotifier: new EmptyUserNotifier(),
   };
 }
 
@@ -75,8 +72,6 @@ describe("answerQuestion", () => {
       const queryResult = createTestQueryResult("テスト回答");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -92,8 +87,6 @@ describe("answerQuestion", () => {
       const replySpy = vi.spyOn(container.messageSender, "reply");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -140,8 +133,6 @@ describe("answerQuestion", () => {
       };
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -155,8 +146,6 @@ describe("answerQuestion", () => {
       const queryResult = createTestQueryResult("回答テキスト");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -176,8 +165,6 @@ describe("answerQuestion", () => {
       const replySpy = vi.spyOn(container.messageSender, "reply");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -198,8 +185,6 @@ describe("answerQuestion", () => {
       const querySpy = vi.spyOn(container.queryEngine, "query");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       querySpy.mockResolvedValue(queryResult);
@@ -215,8 +200,6 @@ describe("answerQuestion", () => {
       const querySpy = vi.spyOn(container.queryEngine, "query");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       querySpy.mockResolvedValue(queryResult);
@@ -229,11 +212,9 @@ describe("answerQuestion", () => {
 
   describe("異常系", () => {
     it("インデックス未構築時に適切なメッセージが返される", async () => {
-      const replySpy = vi.spyOn(container.messageSender, "reply");
+      const notifySpy = vi.spyOn(container.userNotifier, "notifyIndexNotBuilt");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 0,
-        lastUpdatedAt: null,
         isAvailable: false,
       });
 
@@ -242,15 +223,7 @@ describe("answerQuestion", () => {
       expect(result.answer.content).toContain(
         "インデックスが構築されていません",
       );
-      expect(replySpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          messages: expect.arrayContaining([
-            expect.objectContaining({
-              text: expect.stringContaining("インデックスが構築されていません"),
-            }),
-          ]),
-        }),
-      );
+      expect(notifySpy).toHaveBeenCalledWith(input.replyToken);
     });
 
     it("関連ドキュメントが見つからない場合に適切なメッセージが返される", async () => {
@@ -258,11 +231,12 @@ describe("answerQuestion", () => {
         answer: "",
         sources: [],
       };
-      const replySpy = vi.spyOn(container.messageSender, "reply");
+      const notifySpy = vi.spyOn(
+        container.userNotifier,
+        "notifyNoRelevantDocuments",
+      );
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(
@@ -274,25 +248,13 @@ describe("answerQuestion", () => {
       expect(result.answer.content).toContain(
         "該当する情報が見つかりませんでした",
       );
-      expect(replySpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          messages: expect.arrayContaining([
-            expect.objectContaining({
-              text: expect.stringContaining(
-                "該当する情報が見つかりませんでした",
-              ),
-            }),
-          ]),
-        }),
-      );
+      expect(notifySpy).toHaveBeenCalledWith(input.replyToken);
     });
 
     it("ベクトル検索でエラーが発生した場合に例外がスローされる", async () => {
       const error = new SystemError("NETWORK_ERROR", "Search failed");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockRejectedValue(error);
@@ -305,8 +267,6 @@ describe("answerQuestion", () => {
       const error = new SystemError("NETWORK_ERROR", "Send failed");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -349,8 +309,6 @@ describe("answerQuestion", () => {
       const singleInput = { ...input, topK: 1 };
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       querySpy.mockResolvedValue(singleResult);
@@ -376,8 +334,6 @@ describe("answerQuestion", () => {
       const largeTopKInput = { ...input, topK: 100 };
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 1,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(partialResult);
@@ -393,8 +349,6 @@ describe("answerQuestion", () => {
       const longInput = { ...input, questionText: longQuestion };
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -410,8 +364,6 @@ describe("answerQuestion", () => {
       const replySpy = vi.spyOn(container.messageSender, "reply");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -436,8 +388,6 @@ describe("answerQuestion", () => {
       };
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 1,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(singleResult);
@@ -463,8 +413,6 @@ describe("answerQuestion", () => {
       };
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -478,8 +426,6 @@ describe("answerQuestion", () => {
       const queryResult = createTestQueryResult("回答");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -494,8 +440,6 @@ describe("answerQuestion", () => {
       const queryResult = createTestQueryResult("回答");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -510,8 +454,6 @@ describe("answerQuestion", () => {
       const queryResult = createTestQueryResult("回答");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -525,8 +467,6 @@ describe("answerQuestion", () => {
       const queryResult = createTestQueryResult("回答");
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);
@@ -544,8 +484,6 @@ describe("answerQuestion", () => {
       const beforeTime = new Date();
 
       vi.spyOn(container.indexBuilder, "getStatus").mockResolvedValue({
-        entryCount: 10,
-        lastUpdatedAt: new Date(),
         isAvailable: true,
       });
       vi.spyOn(container.queryEngine, "query").mockResolvedValue(queryResult);

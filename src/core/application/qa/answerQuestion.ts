@@ -1,4 +1,3 @@
-import { qaMessages } from "@/api/messages";
 import { createReplyMessage } from "@/core/domain/message/entity";
 import { splitLongMessage } from "@/core/domain/message/services/splitLongMessage";
 import {
@@ -52,14 +51,10 @@ export async function answerQuestion(
 
   if (!indexStatus.isAvailable) {
     // インデックス未構築の場合
-    const answer = createIndexNotBuiltAnswer(
-      answerId,
-      question,
-      qaMessages.indexNotBuilt,
-    );
+    const answer = createIndexNotBuiltAnswer(answerId, question);
 
-    // 回答を返信する
-    await sendAnswerReply(container, replyToken, answer.content);
+    // 定型通知を返信する
+    await container.userNotifier.notifyIndexNotBuilt(replyToken);
 
     return {
       answer,
@@ -71,14 +66,10 @@ export async function answerQuestion(
 
   if (queryResult.sources.length === 0) {
     // 関連ドキュメントなしの場合
-    const answer = createNoRelevantDocumentsAnswer(
-      answerId,
-      question,
-      qaMessages.noRelevantDocuments,
-    );
+    const answer = createNoRelevantDocumentsAnswer(answerId, question);
 
-    // 回答を返信する
-    await sendAnswerReply(container, replyToken, answer.content);
+    // 定型通知を返信する
+    await container.userNotifier.notifyNoRelevantDocuments(replyToken);
 
     return {
       answer,
@@ -93,7 +84,7 @@ export async function answerQuestion(
     new Date(),
   );
 
-  // 4. 回答を返信する
+  // 4. 回答を返信する（動的コンテンツなのでMessageSenderを使用）
   await sendAnswerReply(container, replyToken, answer.content);
 
   return {

@@ -4,7 +4,7 @@ import {
   EmptyIndexBuilder,
   EmptyLogger,
   EmptyMessageSender,
-  EmptyUnitOfWork,
+  EmptyUserNotifier,
 } from "@/core/adapters/empty";
 import type { Container } from "@/core/application/container";
 import { SystemError } from "@/core/application/error";
@@ -25,12 +25,8 @@ import { type SyncDocumentsInput, syncDocuments } from "./syncDocuments";
 function createTestContainer(): Container {
   return {
     config: {
-      appUrl: "http://localhost:3000",
-      databaseUrl: "postgresql://localhost:5432/test",
-      llmProvider: "openai",
-      openaiApiKey: "test-api-key",
+      syncBatchSize: 100,
     },
-    unitOfWork: new EmptyUnitOfWork(),
     logger: new EmptyLogger(),
     documentSource: new EmptyDocumentSource(),
     indexBuilder: new EmptyIndexBuilder(),
@@ -38,6 +34,7 @@ function createTestContainer(): Container {
       query: vi.fn().mockResolvedValue({ answer: "", sources: [] }),
     },
     messageSender: new EmptyMessageSender(),
+    userNotifier: new EmptyUserNotifier(),
   };
 }
 
@@ -89,7 +86,8 @@ describe("syncDocuments", () => {
       const doc = createTestDocument("doc-1", "Test content");
 
       container.documentSource = createMockDocumentSource([doc]);
-      vi.spyOn(container.indexBuilder, "buildIndex").mockResolvedValue({
+      vi.spyOn(container.indexBuilder, "clearIndex").mockResolvedValue();
+      vi.spyOn(container.indexBuilder, "addDocuments").mockResolvedValue({
         totalDocuments: 1,
         totalEntries: 5,
         buildDuration: 1000,
@@ -111,7 +109,8 @@ describe("syncDocuments", () => {
       ];
 
       container.documentSource = createMockDocumentSource(docs);
-      vi.spyOn(container.indexBuilder, "buildIndex").mockResolvedValue({
+      vi.spyOn(container.indexBuilder, "clearIndex").mockResolvedValue();
+      vi.spyOn(container.indexBuilder, "addDocuments").mockResolvedValue({
         totalDocuments: 3,
         totalEntries: 15,
         buildDuration: 3000,
@@ -127,7 +126,10 @@ describe("syncDocuments", () => {
 
     it("ドキュメントがない場合は適切なメッセージを返す", async () => {
       container.documentSource = createMockDocumentSource([]);
-      const pushSpy = vi.spyOn(container.messageSender, "push");
+      const notifySpy = vi.spyOn(
+        container.userNotifier,
+        "notifyNoDocumentsFound",
+      );
 
       const result = await syncDocuments(container, input);
 
@@ -135,31 +137,58 @@ describe("syncDocuments", () => {
       expect(result.successCount).toBe(0);
       expect(result.failedCount).toBe(0);
       expect(result.totalEntries).toBe(0);
-      expect(pushSpy).toHaveBeenCalled();
+      expect(notifySpy).toHaveBeenCalled();
     });
 
     it("同期開始メッセージを返信する", async () => {
       container.documentSource = createMockDocumentSource([]);
-      const replySpy = vi.spyOn(container.messageSender, "reply");
+      const notifySpy = vi.spyOn(container.userNotifier, "notifySyncStarting");
 
       await syncDocuments(container, input);
 
-      expect(replySpy).toHaveBeenCalled();
+      expect(notifySpy).toHaveBeenCalled();
     });
 
     it("同期完了後にPushメッセージを送信する", async () => {
       const doc = createTestDocument("doc-1", "Test content");
       container.documentSource = createMockDocumentSource([doc]);
-      vi.spyOn(container.indexBuilder, "buildIndex").mockResolvedValue({
+      vi.spyOn(container.indexBuilder, "clearIndex").mockResolvedValue();
+      vi.spyOn(container.indexBuilder, "addDocuments").mockResolvedValue({
         totalDocuments: 1,
         totalEntries: 5,
         buildDuration: 1000,
       });
-      const pushSpy = vi.spyOn(container.messageSender, "push");
+      const notifySpy = vi.spyOn(container.userNotifier, "notifySyncCompleted");
 
       await syncDocuments(container, input);
 
-      expect(pushSpy).toHaveBeenCalled();
+      expect(notifySpy).toHaveBeenCalled();
+    });
+
+    it("clearIndexとaddDocumentsが呼び出される", async () => {
+      const doc = createTestDocument("doc-1", "Test content");
+      container.documentSource = createMockDocumentSource([doc]);
+      const clearIndexSpy = vi
+        .spyOn(container.indexBuilder, "clearIndex")
+        .mockResolvedValue();
+      const addDocumentsSpy = vi
+        .spyOn(container.indexBuilder, "addDocuments")
+        .mockResolvedValue({
+          totalDocuments: 1,
+          totalEntries: 5,
+          buildDuration: 1000,
+        });
+
+      await syncDocuments(container, input);
+
+      expect(clearIndexSpy).toHaveBeenCalled();
+      expect(addDocumentsSpy).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: doc.id,
+          title: doc.title,
+          content: doc.content,
+        }),
+      ]);
     });
   });
 
@@ -172,22 +201,23 @@ describe("syncDocuments", () => {
         },
       };
       container.documentSource = errorSource;
-      const pushSpy = vi.spyOn(container.messageSender, "push");
+      const notifySpy = vi.spyOn(container.userNotifier, "notifySyncError");
 
       await expect(syncDocuments(container, input)).rejects.toThrow();
-      expect(pushSpy).toHaveBeenCalled();
+      expect(notifySpy).toHaveBeenCalled();
     });
 
     it("indexBuilderでエラーが発生した場合はエラーメッセージを送信する", async () => {
       const doc = createTestDocument("doc-1", "Test content");
       container.documentSource = createMockDocumentSource([doc]);
-      vi.spyOn(container.indexBuilder, "buildIndex").mockRejectedValue(
-        new SystemError("INTERNAL_SERVER_ERROR", "Failed to build index"),
+      vi.spyOn(container.indexBuilder, "clearIndex").mockResolvedValue();
+      vi.spyOn(container.indexBuilder, "addDocuments").mockRejectedValue(
+        new SystemError("INTERNAL_SERVER_ERROR", "Failed to add documents"),
       );
-      const pushSpy = vi.spyOn(container.messageSender, "push");
+      const notifySpy = vi.spyOn(container.userNotifier, "notifySyncError");
 
       await expect(syncDocuments(container, input)).rejects.toThrow();
-      expect(pushSpy).toHaveBeenCalled();
+      expect(notifySpy).toHaveBeenCalled();
     });
 
     it("Push通知が失敗した場合でもエラーをログに記録する", async () => {
@@ -198,31 +228,13 @@ describe("syncDocuments", () => {
         },
       };
       container.documentSource = errorSource;
-      vi.spyOn(container.messageSender, "push").mockRejectedValue(
+      vi.spyOn(container.userNotifier, "notifySyncError").mockRejectedValue(
         new Error("Push failed"),
       );
       const logSpy = vi.spyOn(container.logger, "error");
 
       await expect(syncDocuments(container, input)).rejects.toThrow();
       expect(logSpy).toHaveBeenCalled();
-    });
-  });
-
-  describe("トランザクション処理", () => {
-    it("既存ドキュメントを削除してから新規ドキュメントを保存する", async () => {
-      const doc = createTestDocument("doc-1", "Test content");
-      container.documentSource = createMockDocumentSource([doc]);
-      vi.spyOn(container.indexBuilder, "buildIndex").mockResolvedValue({
-        totalDocuments: 1,
-        totalEntries: 5,
-        buildDuration: 1000,
-      });
-
-      const runInTxSpy = vi.spyOn(container.unitOfWork, "runInTx");
-
-      await syncDocuments(container, input);
-
-      expect(runInTxSpy).toHaveBeenCalled();
     });
   });
 });
