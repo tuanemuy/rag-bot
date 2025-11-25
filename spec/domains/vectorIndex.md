@@ -156,35 +156,23 @@ type QueryResult = Readonly<{
 
 ```typescript
 type IndexStatus = Readonly<{
-  entryCount: number;
-  lastUpdatedAt: Date | null;
   isAvailable: boolean;
 }>;
 ```
 
-**lastUpdatedAtの取得方法**:
+**設計意図**:
+- データベースを直接扱わず、LlamaIndex APIを通じて取得できる情報のみを使用
+- `isAvailable`はインデックスが利用可能かどうかを示す（ベクトルストアにエントリが存在するか）
 
-lastUpdatedAtはDocumentRepositoryから最大のfetchedAtを取得して使用する。IndexBuilder.getStatus()の実装では、以下のいずれかの方法で取得する：
-
-1. **推奨**: DocumentRepositoryの最大fetchedAtを使用
-   - 理由: ドキュメントの最終同期日時がインデックスの鮮度を最も正確に表す
-   - UC-STATUS-001でDocumentRepositoryにアクセスできるため、アプリケーション層で取得可能
-
-2. **代替案**: LlamaIndexのノードメタデータから取得
-   - LlamaIndexテーブルに直接クエリを発行して最新のcreated_atを取得
-   - 実装がLlamaIndexの内部構造に依存するため、推奨しない
-
-**実装例**（アプリケーション層）:
+**実装例**（IndexBuilder.getStatus()内）:
 ```typescript
-async function checkStatus(container: Container): Promise<void> {
-  const status = await container.indexBuilder.getStatus();
-  const lastFetchedAt = await container.unitOfWork.run(async ({ documentRepository }) => {
-    return documentRepository.getLastFetchedAt(); // 最大のfetchedAtを返す
-  });
+async getStatus(): Promise<IndexStatus> {
+  // LlamaIndex APIを通じてインデックスの存在を確認
+  const index = await VectorStoreIndex.fromVectorStore(this.vectorStore);
+  const nodes = await index.asRetriever({ similarityTopK: 1 }).retrieve("test");
 
-  const statusWithDate = {
-    ...status,
-    lastUpdatedAt: lastFetchedAt,
+  return {
+    isAvailable: nodes.length > 0 || await this.hasAnyNodes(),
   };
 }
 ```
@@ -215,7 +203,6 @@ const VectorIndexErrorCode = {
   SEARCH_FAILED: "VECTOR_INDEX_SEARCH_FAILED",
   DELETE_FAILED: "VECTOR_INDEX_DELETE_FAILED",
   CLEAR_FAILED: "VECTOR_INDEX_CLEAR_FAILED",
-  BUILD_FAILED: "VECTOR_INDEX_BUILD_FAILED",
 
   // 状態エラー
   NOT_FOUND: "VECTOR_INDEX_NOT_FOUND",
@@ -228,6 +215,7 @@ const VectorIndexErrorCode = {
   INVALID_CHUNK_INDEX: "VECTOR_INDEX_INVALID_CHUNK_INDEX",
   INVALID_VECTOR_INDEX_ENTRY_ID: "VECTOR_INDEX_INVALID_VECTOR_INDEX_ENTRY_ID",
   INVALID_TEXT_SPLITTER_CONFIG: "VECTOR_INDEX_INVALID_TEXT_SPLITTER_CONFIG",
+  INVALID_ANSWER_ID: "VECTOR_INDEX_INVALID_ANSWER_ID",
 
   // 回答関連エラー
   CONTEXT_RETRIEVAL_FAILED: "VECTOR_INDEX_CONTEXT_RETRIEVAL_FAILED",
@@ -245,16 +233,22 @@ type VectorIndexErrorCode = typeof VectorIndexErrorCode[keyof typeof VectorIndex
 
 ### IndexBuilder
 
-インデックスの構築・管理を担当するポート。
+インデックスの構築・管理を担当するポート。バッチ処理を前提とした設計。
 
 ```typescript
 interface IndexBuilder {
   /**
-   * ドキュメントからインデックスを構築する
-   * 既存のインデックスは全て削除され、新しいインデックスで置き換えられる
-   * @throws SystemError - インデックス構築に失敗した場合
+   * ドキュメントをインデックスに追加する
+   * 既存のインデックスを保持したまま、新しいドキュメントを追加する
+   *
+   * リトライ機能:
+   * - 外部API（LLM、Embedding）へのリクエスト失敗時に自動リトライ
+   * - exponential backoffによる再試行（デフォルト: 1s → 2s → 4s）
+   * - 環境変数で再試行回数と待機時間を設定可能
+   *
+   * @throws SystemError - ドキュメント追加に失敗した場合（リトライ後も失敗）
    */
-  buildIndex(documents: IndexDocument[]): Promise<IndexBuildResult>;
+  addDocuments(documents: IndexDocument[]): Promise<IndexBuildResult>;
 
   /**
    * インデックスをクリアする
@@ -271,6 +265,29 @@ interface IndexBuilder {
 ```
 
 **使用ユースケース**: UC-SYNC-001, UC-STATUS-001
+
+**インデックス構築パターン**:
+
+インデックスの再構築は `clearIndex()` → 複数回の `addDocuments()` で行う：
+
+```typescript
+await container.indexBuilder.clearIndex();
+
+let totalEntries = 0;
+const startTime = Date.now();
+
+for await (const batch of batchIterate(documents, 100)) {
+  const result = await container.indexBuilder.addDocuments(batch);
+  totalEntries += result.totalEntries;
+}
+
+const buildDuration = Date.now() - startTime;
+```
+
+**設計意図**:
+- メモリ効率: 大量ドキュメントでもバッチ単位で処理可能
+- 柔軟性: バッチサイズを調整して最適なパフォーマンスを実現
+- 復旧性: エラー発生時は再度syncで一貫した状態に復旧可能
 
 ### QueryEngine
 
@@ -312,10 +329,14 @@ type LlamaIndexIndexBuilderConfig = {
   chunkOverlap?: number;
   tableName?: string;
   schemaName?: string;
+  maxRetries?: number;      // デフォルト: 3
+  retryDelay?: number;      // デフォルト: 1000ms
 };
 
 class LlamaIndexIndexBuilder implements IndexBuilder {
   private vectorStore: PGVectorStore;
+  private readonly maxRetries: number;
+  private readonly retryDelay: number;
 
   constructor(private readonly config: LlamaIndexIndexBuilderConfig) {
     Settings.llm = new OpenAI({ model: config.llmModel ?? "gpt-4o-mini", apiKey: config.openaiApiKey });
@@ -328,11 +349,13 @@ class LlamaIndexIndexBuilder implements IndexBuilder {
       schemaName: config.schemaName ?? "public",
       tableName: config.tableName ?? "llamaindex_vectors",
     });
+
+    this.maxRetries = config.maxRetries ?? 3;
+    this.retryDelay = config.retryDelay ?? 1000;
   }
 
-  async buildIndex(documents: IndexDocument[]): Promise<IndexBuildResult> {
+  async addDocuments(documents: IndexDocument[]): Promise<IndexBuildResult> {
     const startTime = Date.now();
-    await this.clearIndex();
 
     const llamaDocs = documents.map(doc => new Document({
       text: doc.content,
@@ -340,14 +363,40 @@ class LlamaIndexIndexBuilder implements IndexBuilder {
       metadata: { documentId: doc.id, title: doc.title },
     }));
 
-    const storageContext = await storageContextFromDefaults({ vectorStore: this.vectorStore });
-    await VectorStoreIndex.fromDocuments(llamaDocs, { storageContext });
+    // リトライ付きでインデックスに追加
+    await this.addDocumentsWithRetry(llamaDocs);
 
     return {
       totalDocuments: documents.length,
       totalEntries: documents.length, // 概算
       buildDuration: Date.now() - startTime,
     };
+  }
+
+  private async addDocumentsWithRetry(llamaDocs: Document[]): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        const storageContext = await storageContextFromDefaults({ vectorStore: this.vectorStore });
+        await VectorStoreIndex.fromDocuments(llamaDocs, { storageContext });
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (attempt < this.maxRetries) {
+          // exponential backoff
+          const delayMs = this.retryDelay * 2 ** attempt;
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+
+    throw new SystemError(
+      SystemErrorCode.IndexAddFailed,
+      "Failed to add documents to index",
+      lastError,
+    );
   }
 
   async clearIndex(): Promise<void> {
@@ -420,9 +469,6 @@ class LlamaIndexQueryEngine implements QueryEngine {
 
 ```typescript
 type Container = {
-  // トランザクション管理
-  unitOfWork: UnitOfWork;
-
   // 共通ポート
   logger: Logger;
 
@@ -434,7 +480,8 @@ type Container = {
   queryEngine: QueryEngine;
 
   // Messageドメインのポート
-  messageSender: MessageSender;
+  messageSender: MessageSender;  // 動的コンテンツ（LLMの回答など）
+  userNotifier: UserNotifier;    // 定型通知（テンプレートベース）
 };
 ```
 
@@ -443,34 +490,55 @@ type Container = {
 ### UC-SYNC-001: ドキュメント同期
 
 ```typescript
-async function syncAndBuildIndex(
+async function syncDocuments(
   eventSource: EventSource,
   replyToken: ReplyToken,
-  container: Container
+  container: Container,
+  batchSize: number = 100
 ): Promise<void> {
-  // ドキュメント取得（取得・パースはDocumentSource内部で行われる）
-  const documents: Document[] = [];
+  const startTime = Date.now();
   const results: Array<{ id: DocumentId; success: boolean }> = [];
 
+  // インデックスをクリア
+  await container.indexBuilder.clearIndex();
+
+  // バッチ単位でドキュメントを取得・インデックス追加
+  let batch: Document[] = [];
+  let totalEntries = 0;
+
   for await (const doc of container.documentSource.iterate()) {
-    documents.push(doc);
+    batch.push(doc);
     results.push({ id: doc.id, success: true });
+
+    if (batch.length >= batchSize) {
+      const indexDocuments = batch.map(doc => ({
+        id: doc.id,
+        title: doc.title as string,
+        content: doc.content as string,
+      }));
+      const result = await container.indexBuilder.addDocuments(indexDocuments);
+      totalEntries += result.totalEntries;
+      batch = [];
+    }
+  }
+
+  // 残りのドキュメントを処理
+  if (batch.length > 0) {
+    const indexDocuments = batch.map(doc => ({
+      id: doc.id,
+      title: doc.title as string,
+      content: doc.content as string,
+    }));
+    const result = await container.indexBuilder.addDocuments(indexDocuments);
+    totalEntries += result.totalEntries;
   }
 
   const syncResult = createSyncResult(results);
-
-  // インデックス構築
-  const indexDocuments = documents.map(doc => ({
-    id: doc.id,
-    title: doc.title as string,
-    content: doc.content as string,
-  }));
-
-  const buildResult = await container.indexBuilder.buildIndex(indexDocuments);
+  const buildDuration = Date.now() - startTime;
 
   // 結果通知
-  const message = createBuildResultMessage(syncResult, buildResult);
-  await container.messageSender.push(destination, message);
+  const destination = getEventSourceDestination(eventSource);
+  await container.userNotifier.notifySyncCompleted(destination, syncResult, { totalEntries, buildDuration });
 }
 ```
 
@@ -502,8 +570,13 @@ async function answerQuestion(
     generatedAt: new Date(),
   });
 
-  // 回答を返信
-  await container.messageSender.reply(replyToken, answer.content as string);
+  // 回答を返信（動的コンテンツなのでMessageSenderを使用）
+  const chunks = splitLongMessage(answer.content as string);
+  const replyMessage = createReplyMessage(
+    replyToken,
+    chunks.map((text) => createTextMessageContent(text))
+  );
+  await container.messageSender.reply(replyMessage);
 }
 ```
 
@@ -515,12 +588,7 @@ async function checkStatus(
   container: Container
 ): Promise<void> {
   const status = await container.indexBuilder.getStatus();
-  const documentCount = await container.unitOfWork.run(async ({ documentRepository }) => {
-    return documentRepository.count();
-  });
-
-  const message = createStatusMessage(documentCount, status);
-  await container.messageSender.reply(replyToken, message);
+  await container.userNotifier.notifyStatus(replyToken, status);
 }
 ```
 
@@ -565,6 +633,12 @@ const vectorIndexConfig = {
   chunkSize: 1000,
   chunkOverlap: 200,
   tableName: "llamaindex_vectors",
+  maxRetries: process.env.INDEX_BUILDER_MAX_RETRIES
+    ? Number.parseInt(process.env.INDEX_BUILDER_MAX_RETRIES, 10)
+    : undefined,
+  retryDelay: process.env.INDEX_BUILDER_RETRY_DELAY
+    ? Number.parseInt(process.env.INDEX_BUILDER_RETRY_DELAY, 10)
+    : undefined,
 };
 
 return {

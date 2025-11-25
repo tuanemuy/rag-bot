@@ -119,7 +119,7 @@ EventSourceは以下のフローで使用される:
 
 1. **プレゼンテーション層**: Webhookイベントからソース情報を抽出し、`createEventSource`でEventSourceを生成
 2. **ユースケースへの受け渡し**: UC-SYNC-001等の非同期処理を行うユースケースにEventSourceを渡す
-3. **Push通知の送信**: 非同期処理完了後、`getEventSourceDestination`で送信先IDを取得し、MessageSender.pushで通知
+3. **Push通知の送信**: 非同期処理完了後、`getEventSourceDestination`で送信先IDを取得し、UserNotifierで通知
 
 ```typescript
 // プレゼンテーション層での使用例
@@ -131,11 +131,11 @@ const eventSource = createEventSource({
 });
 
 // ユースケースに渡す
-await syncAndBuildIndex(eventSource, replyToken, context);
+await syncDocuments(container, { eventSource, replyToken });
 
 // ユースケース内での使用例（Push通知）
 const destination = getEventSourceDestination(eventSource);
-await context.messageSender.push(destination, [{ type: "text", text: "同期が完了しました" }]);
+await container.userNotifier.notifySyncCompleted(destination, syncResult, buildResult);
 ```
 
 **関連ユースケース**: UC-SYNC-001（ドキュメントを同期する）
@@ -255,7 +255,7 @@ function splitLongMessage(text: string): string[] {
 
 ### MessageSender
 
-メッセージ送信のインターフェース。
+動的コンテンツ（LLMの回答など）の送信インターフェース。**アプリケーション層から直接使用する**。
 
 ```typescript
 interface MessageSender {
@@ -279,12 +279,155 @@ interface MessageSender {
 ```
 
 **設計意図**:
+- LLMの回答などユースケースで生成される動的コンテンツの送信に使用
 - `push`メソッドを追加することで、非同期処理完了時の通知が可能になる
-- 同期コマンドなど長時間かかる処理は、即座にReplyで「開始しました」を返信し、完了時にPushで結果を通知する
+- UserNotifierと役割を分担し、動的コンテンツはMessageSender、定型通知はUserNotifierを使用
+
+### UserNotifier
+
+テンプレートベースの定型通知インターフェース。**メッセージ文言はアダプター層で管理する**。
+
+```typescript
+interface UserNotifier {
+  // === 同期関連通知 ===
+
+  /**
+   * 同期開始を通知する（Reply API使用）
+   * @param replyToken - 返信用トークン
+   */
+  notifySyncStarting(replyToken: ReplyToken): Promise<void>;
+
+  /**
+   * 同期完了を通知する（Push API使用）
+   * @param destination - 送信先ID
+   * @param syncResult - 同期結果
+   * @param buildResult - インデックス構築結果
+   */
+  notifySyncCompleted(
+    destination: string,
+    syncResult: SyncResult,
+    buildResult: { totalEntries: number; buildDuration: number }
+  ): Promise<void>;
+
+  /**
+   * ドキュメントが見つからなかったことを通知する（Push API使用）
+   * @param destination - 送信先ID
+   */
+  notifyNoDocumentsFound(destination: string): Promise<void>;
+
+  /**
+   * 同期エラーを通知する（Push API使用）
+   * @param destination - 送信先ID
+   * @param error - エラー情報
+   */
+  notifySyncError(
+    destination: string,
+    error: { type: "not_found" | "system" | "unknown"; message: string }
+  ): Promise<void>;
+
+  // === QA関連通知 ===
+
+  /**
+   * インデックス未構築を通知する（Reply API使用）
+   * @param replyToken - 返信用トークン
+   */
+  notifyIndexNotBuilt(replyToken: ReplyToken): Promise<void>;
+
+  /**
+   * 関連ドキュメントがないことを通知する（Reply API使用）
+   * @param replyToken - 返信用トークン
+   */
+  notifyNoRelevantDocuments(replyToken: ReplyToken): Promise<void>;
+
+  // === ステータス関連通知 ===
+
+  /**
+   * インデックスステータスを通知する（Reply API使用）
+   * @param replyToken - 返信用トークン
+   * @param status - インデックスステータス
+   */
+  notifyStatus(replyToken: ReplyToken, status: IndexStatus): Promise<void>;
+}
+```
+
+**設計意図**:
+- **定型通知専用**: メッセージ文言がアダプター側で決まる通知に使用
+- **動的コンテンツはMessageSender**: LLMの回答などユースケースで生成されるコンテンツはMessageSenderを使用
+- **テスタビリティ**: ユースケースのテストがメッセージ文言に依存しない
+- **多言語対応**: アダプター層でロケール切り替えが容易
+
+### メッセージテンプレート（アダプター層で管理）
+
+UserNotifierアダプターは、以下のメッセージテンプレートを使用する。多言語対応が必要な場合は、ロケールに応じたテンプレートを切り替える。
+
+```typescript
+// アダプター層で定義（例: src/core/adapters/line/messages/ja.ts）
+const syncMessages = {
+  syncStarting: "ドキュメントの同期を開始します...",
+  noDocumentsFound: "同期対象のドキュメントが見つかりませんでした。",
+  systemError: "システムエラーが発生しました。しばらく時間をおいて再度お試しください。",
+} as const;
+
+const qaMessages = {
+  indexNotBuilt: "インデックスが構築されていません。先にsyncコマンドを実行してください。",
+  noRelevantDocuments: "該当する情報が見つかりませんでした。質問を変えてお試しください。",
+} as const;
+
+const statusMessages = {
+  available: "インデックス状態: 利用可能",
+  notAvailable: "インデックス状態: 利用不可（syncコマンドを実行してください）",
+} as const;
+
+// 同期結果からメッセージを生成する関数もアダプター層で定義
+function createSyncResultMessage(result: SyncResult): string { ... }
+function createBuildResultMessage(syncResult: SyncResult, buildResult: BuildResult): string { ... }
+```
+
+### 共通クライアント（アダプター内部実装）
+
+MessageSenderとUserNotifierは、共通のLINE APIクライアントを使用する。これによりリトライロジック等をDRYに保ちつつ、ポート間の依存を避ける。
+
+```typescript
+// アダプター層の内部実装（ポートではない）
+// src/core/adapters/line/lineApiClient.ts
+class LineApiClient {
+  constructor(private config: LineConfig) {}
+
+  /**
+   * Reply APIを呼び出す
+   * リトライ処理込み
+   */
+  async reply(replyToken: string, messages: MessageContent[]): Promise<void> {
+    // リトライロジック込みの送信処理
+  }
+
+  /**
+   * Push APIを呼び出す
+   * リトライ処理込み
+   */
+  async push(to: string, messages: MessageContent[]): Promise<void> {
+    // リトライロジック込みの送信処理
+  }
+}
+```
+
+**設計意図**:
+- **DRY**: リトライロジック、認証、エラーハンドリングを一箇所に集約
+- **ポートの独立性**: MessageSenderとUserNotifierが互いに依存しない
+- **テスト容易性**: 各アダプターを独立してテスト可能
+
+**DIコンテナでの初期化**:
+```typescript
+const client = new LineApiClient(config.line);
+const container = {
+  messageSender: new LineMessageSender(client),
+  userNotifier: new LineUserNotifier(client, messageTemplates),
+};
+```
 
 #### リトライポリシー
 
-MessageSenderのアダプター実装は、以下のリトライポリシーに従う。
+LineApiClientは、以下のリトライポリシーに従う。
 
 - **リトライ対象エラー**: ネットワークエラー、5xx系サーバーエラー、429 Too Many Requests
 - **リトライ対象外**: 4xx系クライアントエラー（400, 401, 403, 404など）
@@ -350,42 +493,144 @@ delay = min(initialDelayMs * (backoffMultiplier ^ (attempt - 1)), maxDelayMs)
 
 ## アプリケーション層での利用
 
-ポートの呼び出しはアプリケーション層が行う。Messageドメインのポートを使用したメッセージ送信処理は以下のように行われる。
+アプリケーション層のユースケースは、以下の基準でポートを使い分ける:
 
-### 返信メッセージの送信
+- **UserNotifier**: 定型通知（メッセージ文言がアダプター側で決まる）
+- **MessageSender**: 動的コンテンツ（ユースケースで生成されるLLMの回答など）
 
-アプリケーション層のユースケース（GenerateAndReplyAnswer, GetIndexStatus等）から呼び出される。
+### ユースケースからの通知
 
-- **入力**: ReplyToken, MessageContent[]（送信するメッセージ）
-- **出力**: void
-- **処理フロー**:
-  1. 各メッセージのテキスト長をチェック
-  2. 5000文字を超える場合は`splitLongMessage`ドメインサービスで分割処理を適用
-  3. MessageSenderポートを使用して送信
-- **長文メッセージの処理方針**:
-  - 基本方針: メッセージの**分割**を採用
-  - 分割の理由: 情報の欠落を防ぎ、ユーザーが必要な情報を確実に得られるようにする
-  - 分割アルゴリズム: `splitLongMessage`ドメインサービスを参照
-  - 分割上限: 最大5メッセージ（LINE APIの制限）
-  - 5メッセージを超える場合: 末尾に「...続きは省略されました」を付与して打ち切り
-  - **情報欠落防止策**: LLM回答生成時のプロンプトで出力長を制限（推奨: 20,000文字以内）
-    - システムプロンプトに「回答は簡潔にまとめ、20,000文字以内に収めてください」等の指示を含める
-    - これにより5メッセージ（25,000文字）を超える回答の発生を抑制
-    - 詳細は設定の`llm.systemPrompt`を参照
+```typescript
+// UC-SYNC-001: ドキュメントを同期する
+// → すべて定型通知なのでUserNotifierを使用
+async function syncDocuments(container: Container, input: SyncDocumentsInput): Promise<SyncDocumentsOutput> {
+  const { replyToken, eventSource } = input;
 
-### プッシュメッセージの送信
+  // 1. 同期開始を通知（Reply）- 定型
+  await container.userNotifier.notifySyncStarting(replyToken);
 
-アプリケーション層のSyncAndBuildIndexユースケースから、非同期処理完了時の通知として呼び出される。
+  const destination = getEventSourceDestination(eventSource);
 
-- **入力**: string（送信先）, MessageContent[]（送信するメッセージ）
-- **出力**: void
-- **処理フロー**:
-  1. 各メッセージのテキスト長をチェック
-  2. 5000文字を超える場合は`splitLongMessage`ドメインサービスで分割処理を適用
-  3. MessageSenderポートを使用して送信
+  try {
+    // 2-3. ドキュメント取得・インデックス構築...
+
+    if (results.length === 0) {
+      // ドキュメントがない場合を通知 - 定型
+      await container.userNotifier.notifyNoDocumentsFound(destination);
+      return { ... };
+    }
+
+    // 4. 同期完了を通知（Push）- 定型
+    await container.userNotifier.notifySyncCompleted(destination, syncResult, buildResult);
+    return { ... };
+  } catch (error) {
+    // エラーを通知 - 定型
+    await container.userNotifier.notifySyncError(destination, {
+      type: isNotFoundError(error) ? "not_found" : isSystemError(error) ? "system" : "unknown",
+      message: error.message,
+    });
+    throw error;
+  }
+}
+
+// UC-QA-001: 質問に回答する
+// → 定型通知はUserNotifier、LLMの回答はMessageSender
+async function answerQuestion(container: Container, input: AnswerQuestionInput): Promise<void> {
+  const { replyToken, question } = input;
+
+  // インデックス未構築の場合 - 定型
+  if (!indexAvailable) {
+    await container.userNotifier.notifyIndexNotBuilt(replyToken);
+    return;
+  }
+
+  // 関連ドキュメントがない場合 - 定型
+  if (relevantDocs.length === 0) {
+    await container.userNotifier.notifyNoRelevantDocuments(replyToken);
+    return;
+  }
+
+  // LLMの回答を送信 - 動的コンテンツ
+  const chunks = splitLongMessage(answer);
+  const replyMessage = createReplyMessage(
+    replyToken,
+    chunks.map((text) => createTextMessageContent(text))
+  );
+  await container.messageSender.reply(replyMessage);
+}
+
+// UC-STATUS-001: インデックス状態を確認する
+// → 定型通知なのでUserNotifierを使用
+async function checkStatus(container: Container, input: CheckStatusInput): Promise<void> {
+  const { replyToken } = input;
+  const status = await container.indexBuilder.getStatus();
+  await container.userNotifier.notifyStatus(replyToken, status);
+}
+```
+
+### ポートの使い分け基準
+
+| 通知タイプ | ポート | 例 |
+|-----------|--------|-----|
+| 定型通知 | UserNotifier | 同期開始/完了、エラー、ステータス、インデックス未構築、関連ドキュメントなし |
+| 動的コンテンツ | MessageSender | LLMの回答 |
+
+### 長文メッセージの処理
+
+- **UserNotifier**: アダプター実装が`splitLongMessage`を内部で使用して自動分割
+- **MessageSender**: ユースケースが`splitLongMessage`を呼び出して分割してから送信
+
+```typescript
+// MessageSenderアダプターの実装例（動的コンテンツ）
+class LineMessageSender implements MessageSender {
+  constructor(private client: LineApiClient) {}
+
+  async reply(replyMessage: ReplyMessage): Promise<void> {
+    await this.client.reply(replyMessage.replyToken as string, replyMessage.messages);
+  }
+
+  async push(to: string, messages: MessageContent[]): Promise<void> {
+    await this.client.push(to, messages);
+  }
+}
+
+// UserNotifierアダプターの実装例（定型通知）
+class LineUserNotifier implements UserNotifier {
+  constructor(
+    private client: LineApiClient,
+    private messages: MessageTemplates
+  ) {}
+
+  async notifySyncStarting(replyToken: ReplyToken): Promise<void> {
+    await this.client.reply(replyToken as string, [
+      createTextMessageContent(this.messages.syncStarting)
+    ]);
+  }
+
+  async notifySyncCompleted(
+    destination: string,
+    syncResult: SyncResult,
+    buildResult: { totalEntries: number; buildDuration: number }
+  ): Promise<void> {
+    const message = createBuildResultMessage(syncResult, buildResult);
+    const chunks = splitLongMessage(message);
+    await this.client.push(
+      destination,
+      chunks.map((text) => createTextMessageContent(text))
+    );
+  }
+
+  async notifyIndexNotBuilt(replyToken: ReplyToken): Promise<void> {
+    await this.client.reply(replyToken as string, [
+      createTextMessageContent(this.messages.indexNotBuilt)
+    ]);
+  }
+
+  // ... 他のメソッド
+}
+```
 
 **設計意図**:
-- 副作用を伴うポートの呼び出しはアプリケーション層の責務
-- ドメインサービス（splitLongMessage）は純粋関数として実装
-- 外部からの入力（プレゼンテーション層）はバリデーションによりMessageContentに変換
-- ドメイン内ではMessageContent型を使用して型安全性を確保
+- **UserNotifier**: 定型通知のメッセージ文言をアダプター層で管理、テスト時はモック化が容易
+- **MessageSender**: 動的コンテンツ（LLMの回答）をそのまま送信、分割処理はユースケースの責務
+- **情報欠落防止策**: LLM回答生成時のプロンプトで出力長を制限（推奨: 20,000文字以内）

@@ -67,7 +67,7 @@ LINEメッセージングに関するドメイン。Webhookイベントの受信
 **注入先の例**:
 - `DocumentSource`: APIエンドポイント、認証情報、パース設定等のデータソース固有の設定
 - `IndexBuilder` / `QueryEngine`: 埋め込みモデル、LLMモデル、チャンク設定、データベース接続
-- `MessageSender`: LINEチャネルアクセストークン
+- `UserNotifier`: LINEチャネルアクセストークン、メッセージテンプレート
 
 ### アーキテクチャレイヤーの責務
 

@@ -129,6 +129,7 @@ const DocumentErrorCode = {
   // バリデーションエラー
   INVALID_URL: "DOCUMENT_INVALID_URL",
   EMPTY_CONTENT: "DOCUMENT_EMPTY_CONTENT",
+  EMPTY_TITLE: "DOCUMENT_EMPTY_TITLE",
 } as const;
 
 type DocumentErrorCode = typeof DocumentErrorCode[keyof typeof DocumentErrorCode];
@@ -168,66 +169,43 @@ DocumentSourceのアダプター実装は、以下のリトライポリシーに
 - **リトライ対象エラー**: ネットワークエラー、5xx系サーバーエラー、429 Too Many Requests
 - **リトライ対象外**: 4xx系クライアントエラー（400, 401, 403, 404など）
 - **アルゴリズム**: 指数バックオフ（Exponential Backoff）
-- **設定**: 設定の`documentApi.retry`を参照
+- **設定**:
   - maxRetries: 最大リトライ回数（デフォルト: 3）
-  - initialDelayMs: 初回遅延（デフォルト: 1000ms）
-  - maxDelayMs: 最大遅延（デフォルト: 10000ms）
-  - backoffMultiplier: 乗数（デフォルト: 2）
+  - retryDelay: 初回遅延（デフォルト: 1000ms）
 
 ```typescript
-// 遅延計算例
+// 遅延計算例（exponential backoff）
+// attempt 0: 即座に実行
 // attempt 1: 1000ms
 // attempt 2: 2000ms
-// attempt 3: 4000ms (maxDelayMsで上限)
-delay = min(initialDelayMs * (backoffMultiplier ^ (attempt - 1)), maxDelayMs)
+// attempt 3: 4000ms
+delay = retryDelay * Math.pow(2, attempt)
 ```
 
-### DocumentRepository
+#### レート制限
 
-ドキュメントを永続化するインターフェース。
+外部APIへの過剰なリクエストを防ぐため、レート制限を設定できる。
+
+- **設定**:
+  - requestDelay: リクエスト間の待機時間（デフォルト: 0ms）
 
 ```typescript
-interface DocumentRepository {
-  /**
-   * ドキュメントを保存する
-   * @throws SystemError - 保存に失敗した場合
-   */
-  save(document: Document): Promise<void>;
-
-  /**
-   * ドキュメントを一括保存する
-   * トランザクション内での使用を前提とし、全件成功/全件失敗のセマンティクスを持つ
-   * @throws SystemError - 保存に失敗した場合（1件でも失敗した場合は全体をロールバック）
-   */
-  saveMany(documents: Document[]): Promise<void>;
-
-  /**
-   * すべてのドキュメントを取得する
-   */
-  findAll(): Promise<Document[]>;
-
-  /**
-   * IDでドキュメントを取得する
-   */
-  findById(id: DocumentId): Promise<Document | null>;
-
-  /**
-   * ドキュメント数を取得する
-   */
-  count(): Promise<number>;
-
-  /**
-   * すべてのドキュメントを削除する
-   */
-  deleteAll(): Promise<void>;
-}
+// 使用例
+// 各ドキュメント取得後に100ms待機
+const config = {
+  requestDelay: 100
+};
 ```
+
+**推奨値**:
+- 通常時: 0ms
+- 大量処理時: 100-500ms
 
 ## 集約型
 
 ### SyncResult
 
-同期処理の結果を表す。
+同期処理の結果を表す。デバッグや詳細なエラーレポートのため、失敗したドキュメントIDも保持する。
 
 ```typescript
 type SyncResult = Readonly<{
@@ -237,8 +215,10 @@ type SyncResult = Readonly<{
   failedIds: DocumentId[];
 }>;
 
-function createSyncResult(results: Array<{ id: DocumentId; success: boolean }>): SyncResult {
-  const failedIds = results.filter(r => !r.success).map(r => r.id);
+function createSyncResult(
+  results: Array<{ id: DocumentId; success: boolean }>
+): SyncResult {
+  const failedIds = results.filter((r) => !r.success).map((r) => r.id);
   return {
     totalCount: results.length,
     successCount: results.length - failedIds.length,
@@ -246,7 +226,15 @@ function createSyncResult(results: Array<{ id: DocumentId; success: boolean }>):
     failedIds,
   };
 }
+```
 
+### メッセージ生成関数
+
+ユーザー通知用メッセージを生成する関数は、アダプター層（`src/core/adapters/line/messages/`）に配置する。これはUIテキストであり、ローカライゼーション（i18n）対応を考慮した設計となっている。
+
+**配置**: `src/core/adapters/line/messages/ja.ts`
+
+```typescript
 /**
  * SyncResultからユーザー通知用メッセージを生成する
  */
@@ -261,9 +249,7 @@ function createSyncResultMessage(result: SyncResult): string {
     // 部分的成功
     return `同期が部分的に完了しました。\n` +
            `成功: ${result.successCount}件\n` +
-           `失敗: ${result.failedCount}件\n` +
-           `失敗したドキュメントID: ${result.failedIds.slice(0, 5).join(", ")}` +
-           (result.failedIds.length > 5 ? ` 他${result.failedIds.length - 5}件` : "");
+           `失敗: ${result.failedCount}件`;
   }
 }
 

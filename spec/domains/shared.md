@@ -23,43 +23,6 @@ function createDocumentId(value: string): DocumentId {
 - Document: ドキュメントの識別
 - VectorIndex: インデックスエントリとドキュメントの紐付け、回答ソースのドキュメント参照
 
-**同期時の削除戦略**:
-
-同期処理では「全削除→全挿入」方式を採用する。
-
-- **方式**: 全削除→全挿入
-- **理由**: 外部APIから削除されたドキュメントも確実に削除するため
-- **実装**: DocumentRepository.deleteAll()で全ドキュメントを削除後、saveManyで全挿入
-
-```typescript
-// DocumentRepositoryのインターフェース
-interface DocumentRepository {
-  /**
-   * 全ドキュメントを削除する
-   * @throws SystemError - 削除に失敗した場合
-   */
-  deleteAll(): Promise<void>;
-
-  /**
-   * 複数ドキュメントを保存する（INSERT）
-   * @throws SystemError - 保存に失敗した場合
-   */
-  saveMany(documents: Document[]): Promise<void>;
-
-  // ... 他のメソッド
-}
-
-// DocumentRepositoryの実装例
-async deleteAll(): Promise<void> {
-  await this.db.delete(documents);
-}
-
-async saveMany(documents: Document[]): Promise<void> {
-  await this.db.insert(documents)
-    .values(documents.map(documentToRow));
-}
-```
-
 ### SimilarityScore
 
 類似度スコア（0-1の範囲）。Answer, VectorIndexドメインで使用する。
@@ -123,8 +86,8 @@ function generateAnswerSourceId(answerId: AnswerId, index: number): AnswerSource
 
 ```typescript
 type Container = {
-  // トランザクション管理（リポジトリはUnitOfWork経由でアクセス）
-  unitOfWork: UnitOfWork;
+  // アプリケーション設定
+  config: AppConfig;
 
   // 共通ポート
   logger: Logger;
@@ -137,13 +100,10 @@ type Container = {
   queryEngine: QueryEngine;
 
   // Messageドメインのポート
-  messageSender: MessageSender;
+  messageSender: MessageSender;  // 動的コンテンツ（LLMの回答など）
+  userNotifier: UserNotifier;    // 定型通知（テンプレートベース）
 };
 ```
-
-**注意**: `DocumentRepository`はContainerに直接含めず、
-`UnitOfWork`の`run()`または`runInTx()`メソッド経由でアクセスする。
-これによりトランザクション境界を明確にし、データ整合性を保証する。
 
 **設定の管理**:
 
@@ -172,24 +132,27 @@ DIコンテナ生成時に設定値を使用してアダプターを初期化す
 
 **使用例**:
 ```typescript
-// SyncAndBuildIndexユースケースでの使用
-async function syncAndBuildIndex(
-  eventSource: EventSource,
-  container: Container
-): Promise<void> {
-  // インデックス構築フェーズ（単一トランザクション）
-  await container.unitOfWork.run(async () => {
-    await container.documentRepository.deleteAll();
-    // ... ドキュメント保存 ...
-  });
+// SyncDocumentsユースケースでの使用
+async function syncDocuments(
+  container: Container,
+  input: SyncDocumentsInput
+): Promise<SyncDocumentsOutput> {
+  // ドキュメントを取得（メモリ上で処理）
+  const documents: Document[] = [];
+  for await (const doc of container.documentSource.iterate()) {
+    documents.push(doc);
+  }
 
   // インデックス構築
+  const indexDocuments = documents.map(toIndexDocument);
   const buildResult = await container.indexBuilder.buildIndex(indexDocuments);
+
+  // 結果を返す
+  return { /* ... */ };
 }
 ```
 
 **実装パス**:
-- `src/core/application/unitOfWork.ts`（UnitOfWorkインターフェース定義）
 - `src/core/application/container.ts`（Container型定義）
 
 ## Loggerポート
@@ -272,7 +235,6 @@ src/core/domain/shared/
     └── logger.ts         # Loggerポート定義
 
 src/core/application/
-├── unitOfWork.ts     # UnitOfWorkインターフェース
 └── container.ts      # Container型定義
 ```
 
@@ -329,7 +291,6 @@ import { EventSource, getEventSourceDestination } from "../domain/message";
 | DOCUMENT_INVALID_HTML_FORMAT | ValidationError | 不正なHTML形式 |
 | DOCUMENT_FIELD_NOT_FOUND | ValidationError | 必須フィールドが見つからない |
 | DOCUMENT_SELECTOR_NOT_FOUND | ValidationError | CSSセレクタが見つからない |
-| DOCUMENT_SAVE_FAILED | SystemError | ドキュメント保存失敗 |
 | DOCUMENT_INVALID_URL | ValidationError | 不正なURL形式 |
 | DOCUMENT_EMPTY_CONTENT | ValidationError | 空のコンテンツ |
 
