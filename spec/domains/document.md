@@ -37,29 +37,6 @@ function createDocument(params: {
 }
 ```
 
-### DocumentListItem
-
-ドキュメント一覧の各アイテムを表す。
-
-```typescript
-type DocumentListItem = Readonly<{
-  id: DocumentId;
-  url: DocumentUrl;
-}>;
-```
-
-### RawDocument
-
-APIから取得した生のドキュメントを表す。
-
-```typescript
-type RawDocument = Readonly<{
-  id: DocumentId;
-  format: DocumentFormat;
-  data: string;
-}>;
-```
-
 ## 値オブジェクト
 
 ### DocumentId
@@ -105,14 +82,6 @@ function createDocumentUrl(value: string): DocumentUrl {
 }
 ```
 
-### DocumentFormat
-
-ドキュメントの形式。
-
-```typescript
-type DocumentFormat = "json" | "html" | "text";
-```
-
 ### DocumentMetadata
 
 ドキュメントのメタデータ。
@@ -120,7 +89,6 @@ type DocumentFormat = "json" | "html" | "text";
 ```typescript
 type DocumentMetadata = Readonly<{
   sourceUrl: DocumentUrl;
-  format: DocumentFormat;
   additionalData: Readonly<Record<string, string | number | boolean | null>>;
 }>;
 ```
@@ -142,86 +110,9 @@ type DocumentMetadata = Readonly<{
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 type DocumentMetadata = Readonly<{
   sourceUrl: DocumentUrl;
-  format: DocumentFormat;
   additionalData: Readonly<Record<string, JsonValue>>;
 }>;
 ```
-
-### PaginationType
-
-ページネーションの種類。
-
-```typescript
-type PaginationType = "offset" | "cursor";
-```
-
-### OffsetPagination
-
-オフセットベースのページネーション情報。
-
-```typescript
-type OffsetPagination = Readonly<{
-  type: "offset";
-  offset: number;
-  limit: number;
-  total: number;
-}>;
-```
-
-### CursorPagination
-
-カーソルベースのページネーション情報。
-
-```typescript
-type CursorPagination = Readonly<{
-  type: "cursor";
-  cursor: string | null;
-  hasNext: boolean;
-}>;
-```
-
-### ParserConfig
-
-パーサーの設定。各ドキュメント形式のパースに必要な設定を定義する。
-
-```typescript
-/**
- * JSONドキュメントのパース設定
- */
-type JsonParserConfig = Readonly<{
-  format: "json";
-  titlePath: string;        // タイトルを取得するJSONパス
-  contentPath: string;      // コンテンツを取得するJSONパス
-  metadataPath?: string;    // メタデータを取得するJSONパス（オプショナル）
-}>;
-
-/**
- * HTMLドキュメントのパース設定
- */
-type HtmlParserConfig = Readonly<{
-  format: "html";
-  titleSelector: string;    // タイトルを取得するCSSセレクタ
-  contentSelector: string;  // コンテンツを取得するCSSセレクタ
-}>;
-
-/**
- * プレーンテキストドキュメントのパース設定
- */
-type TextParserConfig = Readonly<{
-  format: "text";
-  titleLineCount?: number;  // タイトルとして使用する行数（デフォルト: 1）
-}>;
-
-/**
- * パーサー設定の判別共用体
- */
-type ParserConfig = JsonParserConfig | HtmlParserConfig | TextParserConfig;
-```
-
-**設計意図**:
-- ドメイン層で独立した値オブジェクトとして定義し、外部モジュールへの依存を避ける
-- 判別共用体を使用して各形式の設定を型安全に扱う
-- DIコンテナ生成時に環境変数から読み込んだ設定値をもとにParserConfigを生成し、DocumentParserアダプターに注入する
 
 ## エラーコード
 
@@ -231,15 +122,6 @@ Documentドメインで使用するエラーコード。
 const DocumentErrorCode = {
   // 取得エラー
   FETCH_FAILED: "DOCUMENT_FETCH_FAILED",
-  LIST_FETCH_FAILED: "DOCUMENT_LIST_FETCH_FAILED",
-  CONTENT_FETCH_FAILED: "DOCUMENT_CONTENT_FETCH_FAILED",
-
-  // パースエラー
-  PARSE_FAILED: "DOCUMENT_PARSE_FAILED",
-  INVALID_JSON_FORMAT: "DOCUMENT_INVALID_JSON_FORMAT",
-  INVALID_HTML_FORMAT: "DOCUMENT_INVALID_HTML_FORMAT",
-  FIELD_NOT_FOUND: "DOCUMENT_FIELD_NOT_FOUND",
-  SELECTOR_NOT_FOUND: "DOCUMENT_SELECTOR_NOT_FOUND",
 
   // 永続化エラー
   SAVE_FAILED: "DOCUMENT_SAVE_FAILED",
@@ -247,6 +129,7 @@ const DocumentErrorCode = {
   // バリデーションエラー
   INVALID_URL: "DOCUMENT_INVALID_URL",
   EMPTY_CONTENT: "DOCUMENT_EMPTY_CONTENT",
+  EMPTY_TITLE: "DOCUMENT_EMPTY_TITLE",
 } as const;
 
 type DocumentErrorCode = typeof DocumentErrorCode[keyof typeof DocumentErrorCode];
@@ -254,136 +137,75 @@ type DocumentErrorCode = typeof DocumentErrorCode[keyof typeof DocumentErrorCode
 
 ## ポート
 
-### DocumentListFetcher
+### DocumentSource
 
-ドキュメント一覧を取得するインターフェース。
-
-```typescript
-interface DocumentListFetcher {
-  /**
-   * ドキュメント一覧を取得する（オフセットベース）
-   * リトライ処理はアダプター実装で行う（指数バックオフ）
-   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
-   */
-  fetchWithOffset(offset: number, limit: number): Promise<{
-    items: DocumentListItem[];
-    pagination: OffsetPagination;
-  }>;
-
-  /**
-   * ドキュメント一覧を取得する（カーソルベース）
-   * リトライ処理はアダプター実装で行う（指数バックオフ）
-   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
-   */
-  fetchWithCursor(cursor: string | null): Promise<{
-    items: DocumentListItem[];
-    pagination: CursorPagination;
-  }>;
-}
-```
-
-### DocumentContentFetcher
-
-ドキュメント内容を取得するインターフェース。
+すべてのドキュメントを順次取得するインターフェース。データソース固有の取得・パース処理はアダプター実装に委譲する。
 
 ```typescript
-interface DocumentContentFetcher {
+interface DocumentSource {
   /**
-   * ドキュメント内容を取得する
-   * リトライ処理はアダプター実装で行う（指数バックオフ）
-   * @param item - ドキュメントリストアイテム（id と url を含む）
-   * @throws SystemError - 最大リトライ回数を超えてもAPI呼び出しに失敗した場合
+   * すべてのドキュメントを順次取得するイテレータを返す
+   * 取得・パース処理はアダプター実装に依存
+   * @throws SystemError - ドキュメント取得に失敗した場合
    */
-  fetch(item: DocumentListItem): Promise<RawDocument>;
+  iterate(): AsyncIterable<Document>;
 }
 ```
 
 **設計意図**:
-- 引数を`DocumentListItem`とすることで、idとurlを両方渡せる
-- フェッチャーが完全な`RawDocument`（idを含む）を生成できる
-- 呼び出し元でidを付与する必要がなくなり、シンプルな設計になる
+- アプリケーション層がデータソースの詳細（API形式、ページネーション、パース方法）を知る必要がない
+- 異なるデータソースを統一的なインターフェースで扱える
+- AsyncIterableを使用することでメモリ効率が良い
+
+**アダプター実装例**:
+- `HttpSitemapDocumentSource`: sitemapをパース → 各URLからHTML取得 → CSSセレクタでパース
+- `NotionDocumentSource`: Notion APIを呼び出し → Notion形式をパース
+- `FileSystemDocumentSource`: ディレクトリを走査 → ファイルを読み込み・パース
 
 #### リトライポリシー
 
-DocumentListFetcherおよびDocumentContentFetcherのアダプター実装は、以下のリトライポリシーに従う。
+DocumentSourceのアダプター実装は、以下のリトライポリシーに従う。
 
 - **リトライ対象エラー**: ネットワークエラー、5xx系サーバーエラー、429 Too Many Requests
 - **リトライ対象外**: 4xx系クライアントエラー（400, 401, 403, 404など）
 - **アルゴリズム**: 指数バックオフ（Exponential Backoff）
-- **設定**: 設定の`documentApi.retry`を参照
+- **設定**:
   - maxRetries: 最大リトライ回数（デフォルト: 3）
-  - initialDelayMs: 初回遅延（デフォルト: 1000ms）
-  - maxDelayMs: 最大遅延（デフォルト: 10000ms）
-  - backoffMultiplier: 乗数（デフォルト: 2）
+  - retryDelay: 初回遅延（デフォルト: 1000ms）
 
 ```typescript
-// 遅延計算例
+// 遅延計算例（exponential backoff）
+// attempt 0: 即座に実行
 // attempt 1: 1000ms
 // attempt 2: 2000ms
-// attempt 3: 4000ms (maxDelayMsで上限)
-delay = min(initialDelayMs * (backoffMultiplier ^ (attempt - 1)), maxDelayMs)
+// attempt 3: 4000ms
+delay = retryDelay * Math.pow(2, attempt)
 ```
 
-### DocumentParser
+#### レート制限
 
-ドキュメントをパースするインターフェース。
+外部APIへの過剰なリクエストを防ぐため、レート制限を設定できる。
+
+- **設定**:
+  - requestDelay: リクエスト間の待機時間（デフォルト: 0ms）
 
 ```typescript
-interface DocumentParser {
-  /**
-   * 生のドキュメントをパースして構造化する
-   * @throws ValidationError - パースに失敗した場合
-   */
-  parse(rawDocument: RawDocument, config: ParserConfig): Document;
-}
+// 使用例
+// 各ドキュメント取得後に100ms待機
+const config = {
+  requestDelay: 100
+};
 ```
 
-### DocumentRepository
-
-ドキュメントを永続化するインターフェース。
-
-```typescript
-interface DocumentRepository {
-  /**
-   * ドキュメントを保存する
-   * @throws SystemError - 保存に失敗した場合
-   */
-  save(document: Document): Promise<void>;
-
-  /**
-   * ドキュメントを一括保存する
-   * トランザクション内での使用を前提とし、全件成功/全件失敗のセマンティクスを持つ
-   * @throws SystemError - 保存に失敗した場合（1件でも失敗した場合は全体をロールバック）
-   */
-  saveMany(documents: Document[]): Promise<void>;
-
-  /**
-   * すべてのドキュメントを取得する
-   */
-  findAll(): Promise<Document[]>;
-
-  /**
-   * IDでドキュメントを取得する
-   */
-  findById(id: DocumentId): Promise<Document | null>;
-
-  /**
-   * ドキュメント数を取得する
-   */
-  count(): Promise<number>;
-
-  /**
-   * すべてのドキュメントを削除する
-   */
-  deleteAll(): Promise<void>;
-}
-```
+**推奨値**:
+- 通常時: 0ms
+- 大量処理時: 100-500ms
 
 ## 集約型
 
 ### SyncResult
 
-同期処理の結果を表す。
+同期処理の結果を表す。デバッグや詳細なエラーレポートのため、失敗したドキュメントIDも保持する。
 
 ```typescript
 type SyncResult = Readonly<{
@@ -393,8 +215,10 @@ type SyncResult = Readonly<{
   failedIds: DocumentId[];
 }>;
 
-function createSyncResult(results: Array<{ id: DocumentId; success: boolean }>): SyncResult {
-  const failedIds = results.filter(r => !r.success).map(r => r.id);
+function createSyncResult(
+  results: Array<{ id: DocumentId; success: boolean }>
+): SyncResult {
+  const failedIds = results.filter((r) => !r.success).map((r) => r.id);
   return {
     totalCount: results.length,
     successCount: results.length - failedIds.length,
@@ -402,7 +226,15 @@ function createSyncResult(results: Array<{ id: DocumentId; success: boolean }>):
     failedIds,
   };
 }
+```
 
+### メッセージ生成関数
+
+ユーザー通知用メッセージを生成する関数は、アダプター層（`src/core/adapters/line/messages/`）に配置する。これはUIテキストであり、ローカライゼーション（i18n）対応を考慮した設計となっている。
+
+**配置**: `src/core/adapters/line/messages/ja.ts`
+
+```typescript
 /**
  * SyncResultからユーザー通知用メッセージを生成する
  */
@@ -417,9 +249,7 @@ function createSyncResultMessage(result: SyncResult): string {
     // 部分的成功
     return `同期が部分的に完了しました。\n` +
            `成功: ${result.successCount}件\n` +
-           `失敗: ${result.failedCount}件\n` +
-           `失敗したドキュメントID: ${result.failedIds.slice(0, 5).join(", ")}` +
-           (result.failedIds.length > 5 ? ` 他${result.failedIds.length - 5}件` : "");
+           `失敗: ${result.failedCount}件`;
   }
 }
 
@@ -438,6 +268,6 @@ function createBuildResultMessage(
 
 ## アプリケーション層での利用
 
-ポートの呼び出しはアプリケーション層が行う。Documentドメインのポートを使用した処理フローはSyncAndBuildIndexユースケース（`spec/domains/index.md`参照）を参照。
+ポートの呼び出しはアプリケーション層が行う。Documentドメインのポートを使用した処理フローはSyncAndBuildIndexユースケース（`spec/usecases.md`参照）を参照。
 
 **注意**: エンティティ・値オブジェクトのファクトリ関数（createDocument, createDocumentUrl等）がバリデーションを含むビジネスロジックを担当する。複数の集約にまたがる複雑なロジックが必要な場合のみドメインサービスを追加する。

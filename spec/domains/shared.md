@@ -6,7 +6,7 @@
 
 ### DocumentId
 
-ドキュメントの一意識別子。Document, VectorIndex, Answerドメインで使用する。
+ドキュメントの一意識別子。Document, VectorIndexドメインで使用する。
 
 ```typescript
 type DocumentId = string & { readonly brand: "DocumentId" };
@@ -21,49 +21,11 @@ function createDocumentId(value: string): DocumentId {
 
 **使用箇所**:
 - Document: ドキュメントの識別
-- VectorIndex: インデックスエントリとドキュメントの紐付け
-- Answer: 回答ソースのドキュメント参照
-
-**同期時の削除戦略**:
-
-同期処理では「全削除→全挿入」方式を採用する。
-
-- **方式**: 全削除→全挿入
-- **理由**: 外部APIから削除されたドキュメントも確実に削除するため
-- **実装**: DocumentRepository.deleteAll()で全ドキュメントを削除後、saveManyで全挿入
-
-```typescript
-// DocumentRepositoryのインターフェース
-interface DocumentRepository {
-  /**
-   * 全ドキュメントを削除する
-   * @throws SystemError - 削除に失敗した場合
-   */
-  deleteAll(): Promise<void>;
-
-  /**
-   * 複数ドキュメントを保存する（INSERT）
-   * @throws SystemError - 保存に失敗した場合
-   */
-  saveMany(documents: Document[]): Promise<void>;
-
-  // ... 他のメソッド
-}
-
-// DocumentRepositoryの実装例
-async deleteAll(): Promise<void> {
-  await this.db.delete(documents);
-}
-
-async saveMany(documents: Document[]): Promise<void> {
-  await this.db.insert(documents)
-    .values(documents.map(documentToRow));
-}
-```
+- VectorIndex: インデックスエントリとドキュメントの紐付け、回答ソースのドキュメント参照
 
 ### SimilarityScore
 
-類似度スコア（0-1の範囲）。VectorIndex, Answerドメインで使用する。
+類似度スコア（0-1の範囲）。Answer, VectorIndexドメインで使用する。
 
 ```typescript
 type SimilarityScore = number & { readonly brand: "SimilarityScore" };
@@ -77,8 +39,7 @@ function createSimilarityScore(value: number): SimilarityScore {
 ```
 
 **使用箇所**:
-- VectorIndex: 検索結果のスコア
-- Answer: 回答ソースの関連度
+- VectorIndex: 検索結果のスコア（QuerySource.score）、回答ソースの関連度（AnswerSource.score）
 
 ## ID生成規則
 
@@ -94,9 +55,10 @@ function createSimilarityScore(value: number): SimilarityScore {
 | ID型 | 生成方法 | 説明 |
 |------|---------|------|
 | DocumentId | 外部APIのIDをそのまま使用 | 外部システムとの整合性を保つため |
-| VectorIndexEntryId | UUID v7 | チャンク単位で一意に識別 |
-| AnswerId | UUID v7 | 回答を一意に識別 |
-| AnswerSourceId | `${answerId}-source-${index}` | 回答との関連を明示するため（indexは0-indexed） |
+| AnswerId | UUID v7 | 回答を一意に識別（VectorIndexドメイン） |
+| AnswerSourceId | `${answerId}-source-${index}` | 回答との関連を明示するため（indexは0-indexed、VectorIndexドメイン） |
+
+**注記**: ベクトルインデックスエントリのIDはVectorIndexアダプター内部で生成される（UUID v7）。
 
 ### 実装例
 
@@ -108,10 +70,6 @@ function generateAnswerId(): AnswerId {
   return uuidv7() as AnswerId;
 }
 
-function generateVectorIndexEntryId(): VectorIndexEntryId {
-  return uuidv7() as VectorIndexEntryId;
-}
-
 // カスタム形式
 function generateAnswerSourceId(answerId: AnswerId, index: number): AnswerSourceId {
   return `${answerId}-source-${index}` as AnswerSourceId;
@@ -120,53 +78,30 @@ function generateAnswerSourceId(answerId: AnswerId, index: number): AnswerSource
 
 ## アプリケーション層インターフェース
 
-### UnitOfWork
-
-トランザクション境界を管理するインターフェース。
-
-```typescript
-interface UnitOfWork {
-  /**
-   * トランザクション内で処理を実行する
-   * @param fn - トランザクション内で実行する処理
-   * @returns 処理結果
-   * @throws SystemError - トランザクションの開始/コミット/ロールバックに失敗した場合
-   */
-  run<T>(fn: () => Promise<T>): Promise<T>;
-}
-```
-
-**設計意図**:
-- アプリケーション層がトランザクション境界を明示的に制御
-- インフラストラクチャ層の実装詳細（PostgreSQLのトランザクション等）を抽象化
-- ネストされたトランザクション（Savepoint）は現時点ではサポート外
-
-### ApplicationContext
+### Container
 
 アプリケーション層で使用するポートとサービスを集約した型。依存性注入に使用する。
 
+**注記**: 以前は`ApplicationContext`という名前だったが、`Container`に変更された。
+
 ```typescript
-type ApplicationContext = {
-  // トランザクション管理
-  unitOfWork: UnitOfWork;
+type Container = {
+  // アプリケーション設定
+  config: AppConfig;
+
+  // 共通ポート
+  logger: Logger;
 
   // Documentドメインのポート
-  documentListFetcher: DocumentListFetcher;
-  documentContentFetcher: DocumentContentFetcher;
-  documentParser: DocumentParser;
-  documentRepository: DocumentRepository;
+  documentSource: DocumentSource;
 
   // VectorIndexドメインのポート
-  textSplitter: TextSplitter;
-  embeddingGenerator: EmbeddingGenerator;
-  vectorStore: VectorStore;
-
-  // Answerドメインのポート
-  answerGenerator: AnswerGenerator;
-  answerRepository?: AnswerRepository;  // オプショナル: 初期実装では省略可能
+  indexBuilder: IndexBuilder;
+  queryEngine: QueryEngine;
 
   // Messageドメインのポート
-  messageSender: MessageSender;
+  messageSender: MessageSender;  // 動的コンテンツ（LLMの回答など）
+  userNotifier: UserNotifier;    // 定型通知（テンプレートベース）
 };
 ```
 
@@ -197,24 +132,95 @@ DIコンテナ生成時に設定値を使用してアダプターを初期化す
 
 **使用例**:
 ```typescript
-// SyncAndBuildIndexユースケースでの使用
-async function syncAndBuildIndex(
-  eventSource: EventSource,
-  context: ApplicationContext
-): Promise<void> {
-  // インデックス構築フェーズ（単一トランザクション）
-  await context.unitOfWork.run(async () => {
-    await context.vectorStore.clear();
-    const documents = await context.documentRepository.findAll();
-    // ... チャンク分割、埋め込み生成 ...
-    await context.vectorStore.add(entries);
-  });
+// SyncDocumentsユースケースでの使用
+async function syncDocuments(
+  container: Container,
+  input: SyncDocumentsInput
+): Promise<SyncDocumentsOutput> {
+  // ドキュメントを取得（メモリ上で処理）
+  const documents: Document[] = [];
+  for await (const doc of container.documentSource.iterate()) {
+    documents.push(doc);
+  }
+
+  // インデックス構築
+  const indexDocuments = documents.map(toIndexDocument);
+  const buildResult = await container.indexBuilder.buildIndex(indexDocuments);
+
+  // 結果を返す
+  return { /* ... */ };
 }
 ```
 
 **実装パス**:
-- `src/core/application/unitOfWork.ts`（UnitOfWorkインターフェース定義）
-- `src/core/application/context.ts`（ApplicationContext型定義）
+- `src/core/application/container.ts`（Container型定義）
+
+## Loggerポート
+
+アプリケーション全体で使用するロギングインターフェース。エラーハンドリングや運用監視のためのログ出力を担当する。
+
+```typescript
+interface Logger {
+  /**
+   * デバッグログを出力する
+   * 開発時のトレース用。本番環境では通常無効化される
+   */
+  debug(message: string, context?: Record<string, unknown>): void;
+
+  /**
+   * 情報ログを出力する
+   * 正常な処理フローの記録用
+   */
+  info(message: string, context?: Record<string, unknown>): void;
+
+  /**
+   * 警告ログを出力する
+   * 処理は継続可能だが注意が必要な状況
+   */
+  warn(message: string, context?: Record<string, unknown>): void;
+
+  /**
+   * エラーログを出力する
+   * 処理が失敗した状況
+   * @param message - ログメッセージ
+   * @param error - エラーオブジェクト（Errorインスタンスまたはunknown）
+   * @param context - 追加のコンテキスト情報
+   */
+  error(message: string, error?: unknown, context?: Record<string, unknown>): void;
+}
+```
+
+**設計意図**:
+- シンプルなインターフェースを採用し、アダプター実装の自由度を高める
+- コンテキストは`Record<string, unknown>`として柔軟に拡張可能
+- エラーログはエラーオブジェクトを別引数として受け取り、スタックトレースの取得を容易にする
+
+**出力形式**:
+- 開発環境: 人間が読みやすいテキスト形式
+- 本番環境: JSON形式（CloudWatch, Datadog等への連携用）
+
+**ログ出力例**:
+```json
+{
+  "level": "error",
+  "message": "Failed to fetch document content",
+  "timestamp": "2025-01-15T10:30:00.000Z",
+  "requestId": "req-abc123",
+  "errorCode": "DOCUMENT_CONTENT_FETCH_FAILED",
+  "errorMessage": "Connection timeout",
+  "usecase": "UC-SYNC-001",
+  "operation": "fetchDocumentContent",
+  "documentId": "doc-456"
+}
+```
+
+**使用ガイドライン**:
+
+1. **infoレベル**: ユースケースの開始・終了、重要な処理の完了
+2. **warnレベル**: リトライ発生、部分的な失敗（処理は継続）
+3. **errorレベル**: 処理の失敗、例外のキャッチ
+
+**実装パス**: `src/core/domain/shared/ports/logger.ts`
 
 ## 実装パス
 
@@ -222,13 +228,14 @@ async function syncAndBuildIndex(
 
 ```
 src/core/domain/shared/
-├── index.ts          # 再エクスポート
-├── documentId.ts     # DocumentId型定義
-└── similarityScore.ts # SimilarityScore型定義
+├── index.ts              # 再エクスポート
+├── documentId.ts         # DocumentId型定義
+├── similarityScore.ts    # SimilarityScore型定義
+└── ports/
+    └── logger.ts         # Loggerポート定義
 
 src/core/application/
-├── unitOfWork.ts     # UnitOfWorkインターフェース
-└── context.ts        # ApplicationContext型定義（UnitOfWorkを含む）
+└── container.ts      # Container型定義
 ```
 
 ## 各ドメインでの参照方法
@@ -239,24 +246,21 @@ src/core/application/
 // src/core/domain/document/entity.ts
 import { DocumentId } from "../shared";
 
-// src/core/domain/vectorIndex/entity.ts
-import { DocumentId, SimilarityScore } from "../shared";
-
-// src/core/domain/answer/entity.ts
+// src/core/domain/vectorIndex/valueObject.ts
 import { DocumentId, SimilarityScore } from "../shared";
 
 // src/core/application/syncAndBuildIndex.ts
 import { EventSource, getEventSourceDestination } from "../domain/message";
 ```
 
-## 型定義の移動
+## 型定義の配置
 
-以下の型定義は各ドメインから共通モジュールに移動する。
+以下の型定義は各ドメインで使用される共通型として定義する。
 
-| 型 | 移動元 | 移動先 |
-|----|-------|-------|
-| DocumentId | Document, VectorIndex, Answer | shared |
-| SimilarityScore | VectorIndex, Answer | shared |
+| 型 | 配置場所 | 使用ドメイン |
+|----|---------|------------|
+| DocumentId | shared | Document, VectorIndex |
+| SimilarityScore | shared | VectorIndex |
 
 ## エラーコードと例外クラスの対応
 
@@ -287,7 +291,6 @@ import { EventSource, getEventSourceDestination } from "../domain/message";
 | DOCUMENT_INVALID_HTML_FORMAT | ValidationError | 不正なHTML形式 |
 | DOCUMENT_FIELD_NOT_FOUND | ValidationError | 必須フィールドが見つからない |
 | DOCUMENT_SELECTOR_NOT_FOUND | ValidationError | CSSセレクタが見つからない |
-| DOCUMENT_SAVE_FAILED | SystemError | ドキュメント保存失敗 |
 | DOCUMENT_INVALID_URL | ValidationError | 不正なURL形式 |
 | DOCUMENT_EMPTY_CONTENT | ValidationError | 空のコンテンツ |
 
@@ -300,24 +303,19 @@ import { EventSource, getEventSourceDestination } from "../domain/message";
 | VECTOR_INDEX_SEARCH_FAILED | SystemError | インデックス検索失敗 |
 | VECTOR_INDEX_DELETE_FAILED | SystemError | インデックス削除失敗 |
 | VECTOR_INDEX_CLEAR_FAILED | SystemError | インデックスクリア失敗 |
+| VECTOR_INDEX_BUILD_FAILED | SystemError | インデックス構築失敗 |
 | VECTOR_INDEX_NOT_FOUND | NotFoundError | インデックスが見つからない |
 | VECTOR_INDEX_EMPTY | NotFoundError | インデックスが空 |
+| VECTOR_INDEX_NOT_AVAILABLE | NotFoundError | インデックスが利用不可 |
 | VECTOR_INDEX_INVALID_TOP_K | ValidationError | 不正なTopK値 |
 | VECTOR_INDEX_INVALID_EMBEDDING | ValidationError | 不正な埋め込みベクトル |
 | VECTOR_INDEX_INVALID_CHUNK_INDEX | ValidationError | 不正なチャンクインデックス |
-
-#### Answerドメイン
-
-| エラーコード | 例外クラス | 説明 |
-|------------|-----------|------|
-| ANSWER_CONTEXT_RETRIEVAL_FAILED | SystemError | コンテキスト取得失敗 |
-| ANSWER_NO_RELEVANT_DOCUMENTS | NotFoundError | 関連ドキュメントなし |
-| ANSWER_GENERATION_FAILED | SystemError | 回答生成失敗 |
-| ANSWER_LLM_API_ERROR | SystemError | LLM API呼び出し失敗 |
-| ANSWER_INDEX_NOT_AVAILABLE | NotFoundError | インデックスが利用不可 |
-| ANSWER_SAVE_FAILED | SystemError | 回答保存失敗 |
-| ANSWER_EMPTY_QUESTION | ValidationError | 空の質問 |
-| ANSWER_EMPTY_CONTENT | ValidationError | 空の回答コンテンツ |
+| VECTOR_INDEX_CONTEXT_RETRIEVAL_FAILED | SystemError | コンテキスト取得失敗 |
+| VECTOR_INDEX_NO_RELEVANT_DOCUMENTS | NotFoundError | 関連ドキュメントなし |
+| VECTOR_INDEX_GENERATION_FAILED | SystemError | 回答生成失敗 |
+| VECTOR_INDEX_LLM_API_ERROR | SystemError | LLM API呼び出し失敗 |
+| VECTOR_INDEX_EMPTY_QUESTION | ValidationError | 空の質問 |
+| VECTOR_INDEX_EMPTY_CONTENT | ValidationError | 空の回答コンテンツ |
 
 #### Messageドメイン
 
