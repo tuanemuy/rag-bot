@@ -110,12 +110,13 @@ export function createAnswerFromQueryResult(
 export function createNoRelevantDocumentsAnswer(
   id: AnswerId,
   question: Question,
-  message: string,
 ): Answer {
   return {
     id,
     question,
-    content: createAnswerContent(message),
+    content: createAnswerContent(
+      "該当する情報が見つかりませんでした。質問を変えてお試しください。",
+    ),
     sources: [],
     generatedAt: new Date(),
   };
@@ -127,12 +128,13 @@ export function createNoRelevantDocumentsAnswer(
 export function createIndexNotBuiltAnswer(
   id: AnswerId,
   question: Question,
-  message: string,
 ): Answer {
   return {
     id,
     question,
-    content: createAnswerContent(message),
+    content: createAnswerContent(
+      "インデックスが構築されていません。先にsyncコマンドを実行してください。",
+    ),
     sources: [],
     generatedAt: new Date(),
   };

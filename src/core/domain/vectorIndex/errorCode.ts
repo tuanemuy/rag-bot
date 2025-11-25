@@ -7,7 +7,6 @@ export const VectorIndexErrorCode = {
   SearchFailed: "VECTOR_INDEX_SEARCH_FAILED",
   DeleteFailed: "VECTOR_INDEX_DELETE_FAILED",
   ClearFailed: "VECTOR_INDEX_CLEAR_FAILED",
-  BuildFailed: "VECTOR_INDEX_BUILD_FAILED",
 
   // ステータスエラー
   IndexNotFound: "VECTOR_INDEX_NOT_FOUND",

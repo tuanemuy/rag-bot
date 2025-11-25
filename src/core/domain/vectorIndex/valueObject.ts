@@ -95,8 +95,6 @@ export type QueryResult = Readonly<{
  * インデックスの状態情報
  */
 export type IndexStatus = Readonly<{
-  entryCount: number;
-  lastUpdatedAt: Date | null;
   isAvailable: boolean;
 }>;
 

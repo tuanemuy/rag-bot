@@ -6,7 +6,6 @@ export {
   toIndexDocument,
 } from "./entity";
 export { DocumentErrorCode } from "./errorCode";
-export type { DocumentRepository } from "./ports/documentRepository";
 export type { DocumentSource } from "./ports/documentSource";
 export {
   createDocumentContent,

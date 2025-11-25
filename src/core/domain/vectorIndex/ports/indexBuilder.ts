@@ -6,16 +6,17 @@ import type {
 
 /**
  * インデックスの構築・管理を担当するポート
+ * バッチ処理を前提とした設計
  */
 export interface IndexBuilder {
   /**
-   * ドキュメントからインデックスを構築する
-   * 既存のインデックスは全て削除され、新しいインデックスで置き換えられる
-   * @param documents - インデックス対象のドキュメント
+   * ドキュメントをインデックスに追加する
+   * 既存のインデックスを保持したまま、新しいドキュメントを追加する
+   * @param documents - インデックスに追加するドキュメント
    * @returns インデックス構築の結果
-   * @throws SystemError - インデックス構築に失敗した場合
+   * @throws SystemError - ドキュメント追加に失敗した場合
    */
-  buildIndex(documents: IndexDocument[]): Promise<IndexBuildResult>;
+  addDocuments(documents: IndexDocument[]): Promise<IndexBuildResult>;
 
   /**
    * インデックスをクリアする
